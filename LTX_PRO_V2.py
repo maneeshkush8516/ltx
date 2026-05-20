@@ -1016,13 +1016,6 @@ LORA_STACK      = _build_lora_stack(IC_LORA, IC_LORA_STRENGTH,
                                      CAMERA_LORA, CAMERA_LORA_STRENGTH)
 LORA_STACK_JSON = json.dumps(LORA_STACK)
 
-# ── Apply CFG guidance defaults if enabled ───────────────────────────────────
-if USE_CFG_GUIDANCE:
-    USE_REAL_NEGATIVE = True   # CFG > 1 requires a real negative prompt to be meaningful.
-    PASS1_CFG = 3.5
-    PASS2_CFG = 3.5
-    print("   ℹ️  USE_CFG_GUIDANCE=True: USE_REAL_NEGATIVE forced True, CFG set to 3.5")
-
 _active_count = sum(1 for s in LORA_STACK if s["on"])
 print("✅ Character Consistency & LoRA configuration ready.")
 print(f"   Character mode   : {CHARACTER_CONSISTENCY_MODE}  |  strength: {CHARACTER_STRENGTH}")
@@ -1157,6 +1150,13 @@ if AUTO_RESOLUTION:
     WIDTH, HEIGHT, FRAMES = auto_select_resolution()
     print(f"   AUTO_RESOLUTION: selected {WIDTH}x{HEIGHT}, {FRAMES} frames")
 
+# ── Apply CFG guidance defaults if enabled ───────────────────────────────────
+if USE_CFG_GUIDANCE:
+    USE_REAL_NEGATIVE = True   # CFG > 1 requires a real negative prompt to be meaningful.
+    PASS1_CFG = 3.5
+    PASS2_CFG = 3.5
+    print("   ℹ️  USE_CFG_GUIDANCE=True: USE_REAL_NEGATIVE forced True, CFG set to 3.5")
+
 print("✅ Configuration set.")
 print(f"   Resolution : {WIDTH}x{HEIGHT}  |  Frames : {FRAMES}  ({FRAMES/FPS:.1f}s @ {FPS}fps)")
 print(f"   UNet       : {UNET_MODEL}")
@@ -1226,6 +1226,10 @@ def generate_pro(
     use_seed_generator:      bool  = None,   # None -> USE_SEED_GENERATOR global
     use_multi_character:     bool  = None,   # None -> USE_MULTI_CHARACTER global
     multi_characters:        Optional[List[Dict]] = None,  # None -> CHARACTERS global
+    use_cpu_offload:         bool  = None,   # None -> USE_CPU_OFFLOAD global
+    show_taesd_preview:      bool  = None,   # None -> SHOW_TAESD_PREVIEW global
+    use_frame_interpolation: bool  = None,   # None -> USE_FRAME_INTERPOLATION global
+    interpolation_factor:    int   = None,   # None -> INTERPOLATION_FACTOR global
 ) -> Optional[str]:
     """
     LTX-2 PRO V2 — Two-pass generation pipeline with Character Consistency.
@@ -1253,6 +1257,10 @@ def generate_pro(
     _use_seed_gen    = use_seed_generator if use_seed_generator is not None else USE_SEED_GENERATOR
     _use_multi_char  = use_multi_character if use_multi_character is not None else USE_MULTI_CHARACTER
     _characters      = multi_characters  if multi_characters  is not None else CHARACTERS
+    _use_cpu_offload = use_cpu_offload  if use_cpu_offload  is not None else USE_CPU_OFFLOAD
+    _show_taesd_preview      = show_taesd_preview      if show_taesd_preview      is not None else SHOW_TAESD_PREVIEW
+    _use_frame_interpolation = use_frame_interpolation if use_frame_interpolation is not None else USE_FRAME_INTERPOLATION
+    _interpolation_factor    = interpolation_factor    if interpolation_factor    is not None else INTERPOLATION_FACTOR
 
     # ── IMPROVEMENT 23: SeedGenerator node support ────────────────────────
     if _use_seed_gen:
@@ -1269,15 +1277,17 @@ def generate_pro(
             seed = random.randint(0, 2**32 - 1)
             print(f"   SeedGenerator failed ({e}) -- random seed: {seed}")
 
-    # Sigma schedule validation (IMPROVEMENT 8)
-    if not pro_mode:
-        validate_sigmas(pass1_sigmas)
-        validate_sigmas(pass2_sigmas)
-
     # Dynamic sigma schedule (IMPROVEMENT 9)
     if SIGMA_SCHEDULE != "manual" and not pro_mode:
         pass1_sigmas = make_sigmas(PASS1_STEPS, schedule=SIGMA_SCHEDULE)
         print(f"   Sigma schedule ({SIGMA_SCHEDULE}): {pass1_sigmas[:60]}...")
+        validate_sigmas(pass1_sigmas)
+
+    # Sigma schedule validation (IMPROVEMENT 8)
+    if not pro_mode:
+        if SIGMA_SCHEDULE == "manual":
+            validate_sigmas(pass1_sigmas)
+        validate_sigmas(pass2_sigmas)
 
     print("🎬 LTX-2 PRO V2 — Generation Starting")
     print(f"   Resolution   : {width}x{height}  |  Frames: {frames}  |  Seed: {seed}")
@@ -1387,8 +1397,10 @@ def generate_pro(
 
         # ── UNet: UnetLoaderGGUF ──────────────────────────────────────────
         print("\n📦 Loading UNet (GGUF Q4_K_M distilled)...")
+        _unet_from_cache = False
         if USE_MODEL_CACHE and _model_cache.unet_name == _unet and _model_cache.unet is not None:
             unet = _model_cache.unet
+            _unet_from_cache = True
             print("   down cached (UNet)")
         else:
             try:
@@ -1399,7 +1411,7 @@ def generate_pro(
                     "UnetLoaderGGUF not found.\n"
                     "  Fix: Run Cell 1 to clone ComfyUI_GGUF custom node."
                 )
-            if USE_MODEL_CACHE:
+            if USE_MODEL_CACHE and not _unet_from_cache:
                 _model_cache.unet      = unet
                 _model_cache.unet_name = _unet
 
@@ -1772,7 +1784,7 @@ def generate_pro(
         print("   ✓ Pass 1 complete")
 
         # ── IMPROVEMENT 4: TAESD preview after Pass 1 ────────────────────
-        if SHOW_TAESD_PREVIEW:
+        if _show_taesd_preview:
             try:
                 ltxvsep_prev = _node("LTXVSeparateAVLatent")
                 s_prev       = ltxvsep_prev.EXECUTE_NORMALIZED(av_latent=p1_av)
@@ -1805,15 +1817,17 @@ def generate_pro(
                     _pil_preview = tensor_to_pil(
                         _preview_frames[0] if _preview_frames.ndim == 4 else _preview_frames)
                     print("   [TAESD Preview] Pass 1 first-frame preview:")
-                    display(IPImage(data=_pil_preview.tobytes(), format="JPEG",
-                                    width=min(_pil_preview.width, 512)))
+                    import io as _io
+                    _buf = _io.BytesIO()
+                    _pil_preview.save(_buf, format="JPEG", quality=85)
+                    display(IPImage(data=_buf.getvalue(), width=min(_pil_preview.width, 512)))
                     del taesd_vae
                     cleanup_memory()
             except Exception as e:
                 print(f"   ⚠️  TAESD preview failed ({e}) — skipping.")
 
         # ── IMPROVEMENT 11: CPU offload after Pass 1 ─────────────────────
-        if USE_CPU_OFFLOAD:
+        if _use_cpu_offload:
             try:
                 if hasattr(unet, 'model'):
                     unet.model.to('cpu')
@@ -1830,7 +1844,7 @@ def generate_pro(
         _print_vram()
 
         # ── IMPROVEMENT 11: Move UNet back to GPU before Pass 2 ──────────
-        if USE_CPU_OFFLOAD:
+        if _use_cpu_offload:
             try:
                 if hasattr(unet, 'model'):
                     unet.model.to('cuda')
@@ -2003,10 +2017,11 @@ def generate_pro(
                 )
 
     # ── IMPROVEMENT 19: Frame interpolation ──────────────────────────────
-    if USE_FRAME_INTERPOLATION and output_path and os.path.exists(output_path):
+    if _use_frame_interpolation and output_path and os.path.exists(output_path):
         try:
-            effective_fps = fps * INTERPOLATION_FACTOR
-            interp_path = output_path.replace('.mp4', f'_interp{effective_fps}fps.mp4')
+            effective_fps = fps * _interpolation_factor
+            _base, _ext = os.path.splitext(output_path)
+            interp_path = f"{_base}_interp{effective_fps}fps{_ext if _ext else '.mp4'}"
             cmd = ["ffmpeg", "-y", "-i", output_path, "-vf",
                    f"minterpolate=fps={effective_fps}:mi_mode=mci",
                    interp_path]
@@ -2203,6 +2218,11 @@ def run_storyboard(
                 character_name       = scene.get("character_name", CHARACTER_NAME),
                 character_description= scene.get("character_description", CHARACTER_DESCRIPTION),
                 output_prefix        = scene.get("output_prefix", OUTPUT_PREFIX),
+                use_real_negative    = scene.get("use_real_negative",    USE_REAL_NEGATIVE),
+                denoise              = scene.get("denoise",              DENOISE),
+                use_seed_generator   = scene.get("use_seed_generator",   USE_SEED_GENERATOR),
+                use_multi_character  = scene.get("use_multi_character",  USE_MULTI_CHARACTER),
+                multi_characters     = scene.get("multi_characters",     CHARACTERS),
             )
             outputs.append(out)
             prev_output = out
@@ -2236,7 +2256,7 @@ def generate_batch(prompts: List[str], seeds: Optional[List[int]] = None,
     Returns a list of output paths (None for failed items).
     """
     if seeds is None:
-        _base = SEED if 'SEED' in dir() else random.randint(0, 2**32 - 1)
+        _base = globals().get('SEED', random.randint(0, 2**32 - 1))
         seeds = [_base + i for i in range(len(prompts))]
 
     outputs: List[Optional[str]] = []
