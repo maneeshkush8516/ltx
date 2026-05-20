@@ -251,7 +251,7 @@ print("\n✅ All model files downloaded.")
 # @markdown Loads all helpers, VRAM utilities, node wrappers, and the
 # @markdown **Character Consistency** system used in `generate_pro()`.
 
-import os, sys, gc, time, json, csv, shutil, random, math, warnings, subprocess, asyncio
+import os, sys, gc, time, io, json, csv, shutil, random, math, warnings, subprocess, asyncio
 import numpy as np
 import torch
 import cv2
@@ -1230,6 +1230,8 @@ def generate_pro(
     show_taesd_preview:      bool  = None,   # None -> SHOW_TAESD_PREVIEW global
     use_frame_interpolation: bool  = None,   # None -> USE_FRAME_INTERPOLATION global
     interpolation_factor:    int   = None,   # None -> INTERPOLATION_FACTOR global
+    sigma_schedule:          str   = None,   # None -> SIGMA_SCHEDULE global
+    pass1_steps:             int   = None,   # None -> PASS1_STEPS global
 ) -> Optional[str]:
     """
     LTX-2 PRO V2 — Two-pass generation pipeline with Character Consistency.
@@ -1261,6 +1263,8 @@ def generate_pro(
     _show_taesd_preview      = show_taesd_preview      if show_taesd_preview      is not None else SHOW_TAESD_PREVIEW
     _use_frame_interpolation = use_frame_interpolation if use_frame_interpolation is not None else USE_FRAME_INTERPOLATION
     _interpolation_factor    = interpolation_factor    if interpolation_factor    is not None else INTERPOLATION_FACTOR
+    _sigma_schedule = sigma_schedule if sigma_schedule is not None else SIGMA_SCHEDULE
+    _pass1_steps    = pass1_steps    if pass1_steps    is not None else PASS1_STEPS
 
     # ── IMPROVEMENT 23: SeedGenerator node support ────────────────────────
     if _use_seed_gen:
@@ -1278,14 +1282,14 @@ def generate_pro(
             print(f"   SeedGenerator failed ({e}) -- random seed: {seed}")
 
     # Dynamic sigma schedule (IMPROVEMENT 9)
-    if SIGMA_SCHEDULE != "manual" and not pro_mode:
-        pass1_sigmas = make_sigmas(PASS1_STEPS, schedule=SIGMA_SCHEDULE)
-        print(f"   Sigma schedule ({SIGMA_SCHEDULE}): {pass1_sigmas[:60]}...")
+    if _sigma_schedule != "manual" and not pro_mode:
+        pass1_sigmas = make_sigmas(_pass1_steps, schedule=_sigma_schedule)
+        print(f"   Sigma schedule ({_sigma_schedule}): {pass1_sigmas[:60]}...")
         validate_sigmas(pass1_sigmas)
 
     # Sigma schedule validation (IMPROVEMENT 8)
     if not pro_mode:
-        if SIGMA_SCHEDULE == "manual":
+        if _sigma_schedule == "manual":
             validate_sigmas(pass1_sigmas)
         validate_sigmas(pass2_sigmas)
 
@@ -1817,8 +1821,7 @@ def generate_pro(
                     _pil_preview = tensor_to_pil(
                         _preview_frames[0] if _preview_frames.ndim == 4 else _preview_frames)
                     print("   [TAESD Preview] Pass 1 first-frame preview:")
-                    import io as _io
-                    _buf = _io.BytesIO()
+                    _buf = io.BytesIO()
                     _pil_preview.save(_buf, format="JPEG", quality=85)
                     display(IPImage(data=_buf.getvalue(), width=min(_pil_preview.width, 512)))
                     del taesd_vae
@@ -2223,6 +2226,10 @@ def run_storyboard(
                 use_seed_generator   = scene.get("use_seed_generator",   USE_SEED_GENERATOR),
                 use_multi_character  = scene.get("use_multi_character",  USE_MULTI_CHARACTER),
                 multi_characters     = scene.get("multi_characters",     CHARACTERS),
+                use_cpu_offload          = scene.get("use_cpu_offload",         None),
+                show_taesd_preview       = scene.get("show_taesd_preview",      None),
+                use_frame_interpolation  = scene.get("use_frame_interpolation", None),
+                interpolation_factor     = scene.get("interpolation_factor",    None),
             )
             outputs.append(out)
             prev_output = out
