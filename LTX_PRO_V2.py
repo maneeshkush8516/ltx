@@ -186,12 +186,13 @@ dit_model = model_download(
     "/content/ComfyUI/models/unet")
 
 # ── Text encoders ─────────────────────────────────────────────────────────────
+# Gemma fp8 — DEFAULT for T4/A100/RTX3000-4000 (14-24 GB VRAM)
 text_encoder_model = model_download(
-    f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+    f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
     "/content/ComfyUI/models/text_encoders")
-# Gemma fp8 — T4 / A100 / RTX 3000-4000 (uncomment if fp4 OOMs):
+# Gemma fp4 — Blackwell RTX5000 ONLY (uncomment if you have >24 GB VRAM):
 # text_encoder_model = model_download(
-#     f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
+#     f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
 #     "/content/ComfyUI/models/text_encoders")
 
 text_encoder2_model = model_download(
@@ -509,7 +510,13 @@ def purge_vram(label: str = "") -> None:
         try:
             node = NODE_CLASS_MAPPINGS["LayerUtility: PurgeVRAM V2"]()
             fn   = getattr(node, node.FUNCTION)
-            fn()
+            try:
+                fn(anything=None, purge_cache=True, purge_models=False)
+            except TypeError:
+                try:
+                    fn()
+                except Exception:
+                    pass
             print(f"   ✓ VRAM purged via PurgeVRAM V2{tag}")
             return
         except Exception as e:
@@ -698,13 +705,13 @@ def auto_select_resolution() -> Tuple[int, int, int]:
     Returns (width, height, frames).
     """
     if not torch.cuda.is_available():
-        return 768, 512, 121
+        return 768, 512, 97
     vram = torch.cuda.get_device_properties(0).total_memory / 1024**3
     if vram >= 38:
         return 1280, 720, 241
     if vram >= 22:
         return 1024, 576, 161
-    return 768, 512, 121
+    return 768, 512, 97
 
 # ── IMPROVEMENT 13: Prompt history CSV logger ────────────────────────────────
 def append_generation_log(seed: int, width: int, height: int, frames: int,
@@ -926,6 +933,9 @@ INVENT_DIALOGUE    = True   # @param {type:"boolean"}
 # When True the LLM invents natural spoken dialogue woven into the scene.
 
 BYPASS_EASY_PROMPT = False  # @param {type:"boolean"}
+# T4 (14.6 GB): Set True to skip LLM and save ~4 GB peak VRAM.
+# The LLM IS unloaded before video model loads, but peak matters.
+# Recommended for T4: BYPASS_EASY_PROMPT=True, USE_VISION=False
 # True  -> skip LLM, use POSITIVE_PROMPT directly (fast/manual control)
 # False -> LLM expands USER_INPUT into a full cinematic prompt
 
@@ -934,7 +944,10 @@ LORA_TRIGGERS = ""          # @param {type:"string"}
 # e.g. "ohwx woman" or "film grain, 35mm"
 
 # ── Vision image describer (LTX2VisionDescribe node) ─────────────────────────
-USE_VISION   = True          # @param {type:"boolean"}
+USE_VISION   = False         # @param {type:"boolean"}
+# Vision model download is ~20 GB and takes 10+ minutes on first run.
+# Set True only if you have a reference image and L4/A100 GPU.
+# For T4: keep False to save VRAM and time.
 # When True AND an image is provided, Vision Describe analyses it and passes
 # the result as scene_context to Easy Prompt.
 
@@ -1060,8 +1073,18 @@ NEGATIVE_PROMPT = (  # @param {type:"string"}
 # ── Resolution & length ───────────────────────────────────────────────────────
 WIDTH  = 768   # @param {type:"integer"}
 HEIGHT = 512   # @param {type:"integer"}
-FRAMES = 121   # @param {type:"integer"}
+FRAMES = 97    # @param {type:"integer"}
+# T4  safe (14.6 GB): 768x512, 97 frames (~3.9s @ 25fps)
+# L4  (24 GB):        1024x576, 161 frames
+# A100 (40 GB):       1280x720, 241 frames
+# Set AUTO_RESOLUTION=True to auto-select based on VRAM
 FPS    = 25    # @param {type:"integer"}
+
+# ── T4 VRAM quick-reference ───────────────────────────────────────────────────
+# T4  (14.6 GB): CLIP_NAME1=fp8, FRAMES=97,  WIDTH=768,  HEIGHT=512
+# L4  (24 GB):   CLIP_NAME1=fp8, FRAMES=161, WIDTH=1024, HEIGHT=576
+# A100 (40 GB):  CLIP_NAME1=fp8, FRAMES=241, WIDTH=1280, HEIGHT=720
+# Blackwell:     CLIP_NAME1=fp4, FRAMES=241, WIDTH=1280, HEIGHT=720
 
 # ── Seed ─────────────────────────────────────────────────────────────────────
 SEED                = 47    # @param {type:"integer"}
@@ -1069,7 +1092,11 @@ AUTO_INCREMENT_SEED = True  # @param {type:"boolean"}
 
 # ── Model filenames ───────────────────────────────────────────────────────────
 UNET_MODEL      = "ltx-2-19b-distilled_Q4_K_M.gguf"
-CLIP_NAME1      = "gemma_3_12B_it_fp4_mixed.safetensors"
+CLIP_NAME1      = "gemma_3_12B_it_fp8_scaled.safetensors"
+# Gemma: choose based on your GPU
+# fp8 (DEFAULT — T4/A100/RTX3000-4000): gemma_3_12B_it_fp8_scaled.safetensors
+# fp4 (Blackwell RTX5000 ONLY):          gemma_3_12B_it_fp4_mixed.safetensors
+# T4 has 14.6 GB — fp4 needs ~12 GB alone and OOMs with LLM loaded first
 CLIP_NAME2      = "ltx-2-19b-embeddings_connector_distill_bf16.safetensors"
 VAE_VIDEO_MODEL = "LTX2_video_vae_bf16.safetensors"
 VAE_AUDIO_MODEL = "LTX2_audio_vae_bf16.safetensors"
