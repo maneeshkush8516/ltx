@@ -2230,6 +2230,8 @@ def run_storyboard(
                 show_taesd_preview       = scene.get("show_taesd_preview",      None),
                 use_frame_interpolation  = scene.get("use_frame_interpolation", None),
                 interpolation_factor     = scene.get("interpolation_factor",    None),
+                sigma_schedule           = scene.get("sigma_schedule",          None),
+                pass1_steps              = scene.get("pass1_steps",             None),
             )
             outputs.append(out)
             prev_output = out
