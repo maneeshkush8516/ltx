@@ -54,12 +54,17 @@ GPU REQUIREMENTS:
 # @markdown - **ComfyUI-LTXVideo** (tiled VAE decode + AV helpers)
 
 # ── Base Python packages ──────────────────────────────────────────────────────
+# -- Colab shell commands (uncomment in Google Colab) --
+# These lines use Colab/Jupyter shell (!) and magic (%) syntax.
+# They are commented out for static analysis / AST validity but MUST be
+# uncommented when running in a fresh Google Colab session.
 # !pip install torch torchvision torchaudio
 
 # %cd /content
 from IPython.display import clear_output
 clear_output()
 
+# -- Colab shell commands (uncomment in Google Colab) --
 # !pip install -q torchsde einops diffusers accelerate nest_asyncio
 # !pip install -q av spandrel albumentations onnx opencv-python onnxruntime
 # !pip install -q imageio imageio-ffmpeg
@@ -67,12 +72,14 @@ clear_output()
 # Extra packages required by EasyPrompt & VisionDescribe nodes
 # !pip install -q transformers>=4.43.0 accelerate qwen-vl-utils huggingface_hub
 
-# ── ComfyUI (pinned branch — matches reference notebook) ─────────────────────
+# ── ComfyUI (pinned branch -- matches reference notebook) ────────────────────
+# -- Colab shell commands (uncomment in Google Colab) --
 # !git clone --branch ComfyUI_22_01_2026_v0.10.0 https://github.com/Isi-dev/ComfyUI.git
 # !pip install -r /content/ComfyUI/requirements.txt -q
 clear_output()
 
 # ── Custom nodes ──────────────────────────────────────────────────────────────
+# -- Colab shell commands (uncomment in Google Colab) --
 # %cd /content/ComfyUI/custom_nodes
 
 # Core KJNodes (pinned build — ImageResizeKJv2, PathchSageAttentionKJ, etc.)
@@ -89,6 +96,7 @@ clear_output()
 # !git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git
 
 # ── Install node requirements ─────────────────────────────────────────────────
+# -- Colab shell commands (uncomment in Google Colab) --
 # %cd /content/ComfyUI/custom_nodes/ComfyUI_KJNodes
 # !pip install -r requirements.txt -q
 
@@ -268,7 +276,7 @@ from IPython.display import display, HTML, Image as IPImage, clear_output
 from google.colab import files
 
 warnings.filterwarnings("ignore")
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# NOTE: PYTORCH_CUDA_ALLOC_CONF already set in Cell 1 with garbage_collection_threshold
 sys.path.insert(0, "/content/ComfyUI")
 
 import re
@@ -492,12 +500,113 @@ class InlinePromptArchitect:
         text = InlinePromptArchitect._ROLE_BLEED_RE.sub("", text)
         text = re.sub(r"\.(assistant|user|system|<\|[^|>]*\|>)\s*\n", ".\n", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*\n+Note:.*$", "", text, flags=re.DOTALL).strip()
+
+        # Strip everything AFTER the AMBIENT tag if one still appears
+        ambient_match = re.search(r"\[AMBIENT:[^\]]*\]", text, flags=re.IGNORECASE)
+        if ambient_match:
+            text = text[:ambient_match.end()].strip()
+
+        # Strip trailing (Lora: ...) tags the model echoes from the LoRA instruction
+        text = re.sub(r"\s*\(Lora:[^)]*\)\s*$", "", text, flags=re.IGNORECASE).strip()
+
+        # Strip trailing (Note: ...) blocks and everything after
         text = re.sub(r"\s*\(Note:.*$", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+        # Strip instruction labels that leaked into output
+        text = re.sub(
+            r"^(Action Beat \d+:|Undressing Segment:|Flash/Reveal Segment:|Titty Drop[^:]*:|Note:|Scene Instruction:|Pacing:|Dialogue Instruction:).*",
+            "",
+            text,
+            flags=re.IGNORECASE | re.MULTILINE,
+        ).strip()
+
+        # Strip orphaned closing bracket spam: ) ) ) ) ) ...
+        text = re.sub(r"[\s)]{3,}$", "", text).strip()
+
+        # Catch the fake conversation / self-eval patterns
+        text = re.sub(
+            r"\s*\n+\d+\s+tokens[\s,].*$",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+        text = re.sub(
+            r"\s*\n+(Please let me know|Let me revise|No further revision|Confirmed\.|"
+            r"Written to meet|The scene is now over|The output ends|The task is|The task was|"
+            r"The goal was|Nothing more|No continuation|No additional|The response does not|"
+            r"It does not continue|It ceases when|Any such statement|"
+            r"Output length:|Action count:|Total time:|Last character:|I avoided|I wrote|"
+            r"I adhered|I hope this|Thank you for your|Please confirm|I submitted|"
+            r"I can revise|feel free to instruct).*$",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+
+        # Strip model loop/panic patterns
+        text = re.sub(
+            r"\s*(Ended\.\s*\d+\s*actions|"
+            r"\d+\s+actions[\.,]\s*\d+\s+tokens|"
+            r"\d+\s+tokens[\.,]\s*Done|"
+            r"Done\.\s+\d+\s+seconds|"
+            r"Finished\.\s+\d+|"
+            r"The end\.\s+\d+\s+seconds|"
+            r"Fading to black\.\s+The end|"
+            r"The model stops|The output ends here|The scene ends here|"
+            r"It\'s complete now|All done\.|Stop now\.|"
+            r"End of prompt|End of output|No more to add|Nothing to revise|"
+            r"The work is (?:done|finished|complete)|The prompt is (?:done|finished|complete)|"
+            r"No further writing|No more writing|Stop\.\s+Finish|Finished\.\s+Complete|"
+            r"The scene is complete|The scene is over|Complete\.\s+Finished|"
+            r"Done\.\s+No more|BorderSide:).*$",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+
+        # Strip filler character spam (repeated single characters)
+        text = re.sub(r"(\s*\b(\w)\b\s*){10,}", " ", text).strip()
+
+        # Strip token+action count combos
         text = re.sub(r"\s*\(\d+\s+tokens?[^)]*\)", "", text, flags=re.IGNORECASE).strip()
+
+        # Strip compliance checklist spam - 2+ consecutive parens after last sentence
         text = re.sub(r"\s*(\([^)]{5,120}\)\s*){2,}$", "", text, flags=re.DOTALL).strip()
-        text = re.sub(r"\[AMBIENT:\s*([^\]]*)\]", r"\1", text, flags=re.IGNORECASE).strip()
+
+        # Strip single trailing compliance paren with known instruction keywords
+        text = re.sub(
+            r"\s*\([^)]{0,200}(no setup|no resolution|action count|actions adhered|"
+            r"token count|pacing|dialogue integrated|character age|inline prose|"
+            r"no padding|no extraneous|exactly \d+ action|hard stop|BorderSide)[^)]{0,200}\)\s*$",
+            "",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
+
+        # Strip leaked pacing instruction echoes
+        text = re.sub(r"\(Exact timing:.*?\)", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+        # Strip token/word count lines
+        text = re.sub(r"\s*\n*(token|word)\s+count\s*:\s*\d+.*$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+
+        # Strip leaked internal pacing/time tags
         text = re.sub(r"\[TIME LIMIT[^\]]*\]", "", text, flags=re.IGNORECASE).strip()
         text = re.sub(r"\[PACING[^\]]*\]", "", text, flags=re.IGNORECASE).strip()
+
+        # Strip leaked timestamp annotations
+        text = re.sub(r"\s*\(\d+\s+seconds?\)\s*$", "", text).strip()
+        text = re.sub(r"\s*\(\d+:\d+\s*[-\u2013]\s*\d+:\d+\)\s*", " ", text).strip()
+
+        # Strip inline action-time annotations
+        text = re.sub(r"\(The action takes up roughly[^\)]*\)", " ", text, flags=re.IGNORECASE).strip()
+
+        # Strip screenplay-style bracketed camera directions
+        text = re.sub(r"\((?:DOWN|UP|PULL|PUSH|ZOOM|HOLD|FADE|PAN|TILT|TRUCK|DOLLY|AMBIENT)[^\)]{0,80}\)", "", text, flags=re.IGNORECASE).strip()
+
+        # Convert [AMBIENT: ...] tags to clean prose
+        text = re.sub(r"\[AMBIENT:\s*([^\]]*)\]", r"\1", text, flags=re.IGNORECASE).strip()
+
+        # Clean up any double blank lines left by removals
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
         return text
 
@@ -599,10 +708,62 @@ class InlinePromptArchitect:
                 f"\n[LORA INSTRUCTION: Begin output with: {lora_triggers.strip()}]"
             )
 
+        # ── Content-tier detection ────────────────────────────────────────
+        # Tier 3: explicit anatomical/act terms
+        _explicit_re = re.compile(
+            r"\b(pussy|cock|dick|penis|vagina|clit|clitoris|anus|asshole|"
+            r"tits|cum|jizz|squirt\w*|creampie|orgasm|fuck|fucking|"
+            r"blowjob|handjob|bj|hj|breed\w*|bareback|raw\s+dog|"
+            r"balls|ballsack|taint|penetrat\w*|thrust\w*)\b",
+            re.IGNORECASE,
+        )
+        # Tier 2: nudity/sensuality implied
+        _sensual_re = re.compile(
+            r"\b(naked|nude|topless|undress\w*|strip\w*|takes?\s+off|"
+            r"sensual|erotic|intimate|lingerie|bare\s+skin|bare\s+body|"
+            r"braless|pantyless|commando|see.through|sheer|"
+            r"titty\s+drop|titties|flash\w*\s+(her|his)?\s*(tits|boobs|breasts)|"
+            r"bath\w*|shower\w*|bikini|thong|g.string)\b",
+            re.IGNORECASE,
+        )
+
+        is_explicit = bool(_explicit_re.search(user_input))
+        is_sensual = bool(_sensual_re.search(user_input)) and not is_explicit
+
+        # Build tier-specific instruction
+        if is_explicit:
+            tier_instruction = (
+                "\n[INSTRUCTION: This is an explicit adult scene. "
+                "Use direct anatomical terms exactly as the user wrote them. "
+                "Do not replace with euphemisms. Describe body parts, positions, "
+                "and physical actions with blunt, specific language. "
+                "Always state character age as a specific number.]"
+            )
+        elif is_sensual:
+            tier_instruction = (
+                "\n[INSTRUCTION: This scene involves nudity or sensual content. "
+                "Describing the bare body naturally is appropriate. "
+                "However, do NOT introduce sexual acts the user did not ask for. "
+                "Keep the tone sensual and cinematic, not pornographic. "
+                "Always state character age as a specific number.]"
+            )
+        else:
+            tier_instruction = (
+                "\n[INSTRUCTION: Always state the character's age as a specific number.]"
+            )
+
+        # ── Pacing enforcement ────────────────────────────────────────────
+        pacing_instruction = (
+            f"\n[PACING: {pacing_hint} "
+            f"Write approximately {token_val} tokens total. "
+            f"Do not exceed the action count. "
+            f"Do NOT write token count, word count, or any parenthetical summary at the end.]"
+        )
+
         messages = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
-            {"role": "user", "content": effective_input + lora_instruction +
-             f"\n[PACING: {pacing_hint} Write ~{token_val} tokens.]"},
+            {"role": "user", "content": effective_input + tier_instruction +
+             lora_instruction + pacing_instruction},
         ]
 
         is_qwen3 = "Qwen3" in (model_key or "")
@@ -888,10 +1049,62 @@ class PersistentLatentSeed:
         return noise * self.strength
 
     def blend_into_latent(self, latent_tensor, num_frames=None):
-        """Blend persistent noise into the first N frames of a video latent."""
+        """Blend persistent noise into the first N frames of a video latent.
+
+        Mixes the persistent character noise into the latent tensor at
+        self.strength weight for the specified num_frames (defaults to all).
+        """
         if self._noise_tensor is None:
             return latent_tensor
-        # This is a simplified blend - actual implementation would match latent dims
+
+        import torch.nn.functional as F
+        noise = self._noise_tensor
+
+        # Determine how many frames to blend into
+        if latent_tensor.ndim == 5:
+            # Video latent: (B, C, T, H, W) or (B, T, C, H, W)
+            total_t = latent_tensor.shape[2]
+            blend_frames = min(num_frames, total_t) if num_frames is not None else total_t
+
+            # Resize noise to match spatial dims of the latent
+            target_h, target_w = latent_tensor.shape[3], latent_tensor.shape[4]
+            if noise.ndim == 3:
+                noise = noise.unsqueeze(0)  # Add batch dim
+            # Ensure noise has right channel count
+            if noise.ndim == 4 and noise.shape[-1] <= 4:
+                noise = noise.permute(0, 3, 1, 2)  # NHWC -> NCHW
+            noise_resized = F.interpolate(
+                noise[:1, :latent_tensor.shape[1]],
+                size=(target_h, target_w),
+                mode='bilinear', align_corners=False
+            )
+            # Apply blend to the first N frames with strength weighting
+            blended = latent_tensor.clone()
+            for t in range(blend_frames):
+                # Temporal decay: stronger blend at the start, fading toward num_frames
+                temporal_weight = self.strength * (1.0 - t / max(blend_frames, 1))
+                blended[:, :, t] = (
+                    (1.0 - temporal_weight) * blended[:, :, t]
+                    + temporal_weight * noise_resized
+                )
+            return blended
+
+        elif latent_tensor.ndim == 4:
+            # Single image latent: (B, C, H, W)
+            target_h, target_w = latent_tensor.shape[2], latent_tensor.shape[3]
+            if noise.ndim == 3:
+                noise = noise.unsqueeze(0)
+            if noise.ndim == 4 and noise.shape[-1] <= 4:
+                noise = noise.permute(0, 3, 1, 2)
+            noise_resized = F.interpolate(
+                noise[:1, :latent_tensor.shape[1]],
+                size=(target_h, target_w),
+                mode='bilinear', align_corners=False
+            )
+            blended = (1.0 - self.strength) * latent_tensor + self.strength * noise_resized
+            return blended
+
+        # Fallback for unexpected dims
         return latent_tensor
 
 
@@ -3440,7 +3653,7 @@ def decompose_script_to_scenes(
 
         # Build scene dict
         scene_dict = {
-            "user_input": _llm_input,  # RAW action for LLM to expand professionally
+            "user_input": _llm_input + " " + _mandatory_quality,  # Append quality keywords DIRECTLY
             "image_path": _char_image_path if seg_idx == 0 else None,
             "frames": frames_per_segment,
             "seed": _seed + seg_idx,
@@ -4009,6 +4222,7 @@ print(f"   Parallel exp : {USE_PARALLEL_PROMPT_EXPANSION}")
 # @markdown ## 💥 7. Define generate_pro()
 # @markdown Run this cell once per session. Edit Cells 5-6 and re-run Cell 9.
 
+@vram_guard
 def generate_pro(
     user_input:              str   = USER_INPUT,
     image_path:              str   = IMAGE_PATH,
@@ -4176,6 +4390,18 @@ def generate_pro(
     _use_multi_res = use_multi_resolution if use_multi_resolution is not None else USE_MULTI_RESOLUTION
     _export_timeline = export_timeline if export_timeline is not None else EXPORT_TIMELINE
     _persist_to_gdrive = persist_to_gdrive if persist_to_gdrive is not None else PERSIST_TO_GDRIVE
+
+    # ── Apply VRAMManager optimal settings (unless user explicitly overrode) ──
+    _vram_settings = _VRAM_MGR.get_optimal_settings()
+    if _VRAM_MGR.is_t4 or _VRAM_MGR.is_low_vram:
+        # Cap frames if user did not explicitly set a lower value
+        _vram_max_frames = _vram_settings.get("max_frames", frames)
+        if frames > _vram_max_frames:
+            frames = _vram_max_frames
+        # Enable tiled VAE for low VRAM if not explicitly set
+        if use_tiled_vae is None or use_tiled_vae == USE_TILED_VAE:
+            if _vram_settings.get("use_tiled_vae", False):
+                use_tiled_vae = True
 
     print("🎬 LTX-2 PRO — Generation Starting")
     print(f"   Resolution   : {width}×{height}  |  Frames: {frames}  |  Seed: {seed}")
@@ -5567,7 +5793,23 @@ def generate_infinite_flow(
     # Update FlowState
     if result:
         flow_state.segment_index = config.max_segments
-        flow_state.total_frames = config.max_segments * config.segment_length
+        # Populate segment_paths from the segment cache directory
+        _cache_dir = f"/content/ComfyUI/output/{_prefix}_segments"
+        if os.path.isdir(_cache_dir):
+            import glob
+            _seg_files = sorted(glob.glob(os.path.join(_cache_dir, "segment_*.mp4")))
+            flow_state.segment_paths = _seg_files
+            # Calculate actual total frames from segment count and config
+            _actual_segments = len(_seg_files) if _seg_files else config.max_segments
+            flow_state.total_frames = (
+                _actual_segments * config.segment_length
+                - max(0, _actual_segments - 1) * config.overlap_frames
+            )
+        else:
+            flow_state.total_frames = config.max_segments * config.segment_length
+        # Record the prompt and seed used
+        flow_state.prompts_used.append(_user_input or _pos_prompt)
+        flow_state.seeds_used.append(config.base_seed)
 
     return result
 
@@ -6054,9 +6296,9 @@ try:
             print(f"🔢 Next seed: {SEED}")
 
     elif USE_SEGMENT_EXTENSION:
-        # ── SVI-Pro extended video mode ───────────────────────────────────
-        print("🎬 Running SVI-Pro segment extension mode…")
-        output = generate_extended_video(
+        # ── SVI-Pro extended video mode (via Infinite Flow Engine) ────────
+        print("🎬 Running Infinite Flow segment extension mode...")
+        output = generate_infinite_flow(
             user_input             = USER_INPUT,
             image_path             = IMAGE_PATH,
             positive_prompt        = POSITIVE_PROMPT,
@@ -6071,12 +6313,6 @@ try:
             character_mode         = CHARACTER_CONSISTENCY_MODE,
             character_name         = CHARACTER_NAME,
             character_description  = CHARACTER_DESCRIPTION,
-            segment_length         = SEGMENT_LENGTH,
-            max_segments           = MAX_SEGMENTS,
-            overlap_frames         = OVERLAP_FRAMES,
-            overlap_mode           = OVERLAP_MODE,
-            overlap_side           = OVERLAP_SIDE,
-            segment_seed_mode      = SEGMENT_SEED_MODE,
             output_prefix          = OUTPUT_PREFIX,
             # Pass through sampling settings
             pass1_sigmas           = PASS1_SIGMAS,

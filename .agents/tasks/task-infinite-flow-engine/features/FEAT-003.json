@@ -1,0 +1,36 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Fix all issues identified in the code review: wire generate_infinite_flow into Cell 9, implement blend_into_latent, expand _clean_output patterns, add content-tier detection, apply VRAMManager settings, apply @vram_guard decorator, populate FlowState fields, fix PYTORCH_CUDA_ALLOC_CONF overwrite, add Colab comment explanations, enforce quality keywords in user_input.",
+  "status": "completed",
+  "steps": [
+    "Step 1: Change Cell 9 USE_SEGMENT_EXTENSION branch to call generate_infinite_flow() instead of generate_extended_video()",
+    "Step 2: Implement actual blend logic in PersistentLatentSeed.blend_into_latent()",
+    "Step 3: Expand _clean_output with ~20 missing regex cleanup patterns from LTX2EasyPromptLD.py",
+    "Step 4: Add content-tier detection (explicit/sensual/neutral) and pacing enforcement to InlinePromptArchitect.generate()",
+    "Step 5: Apply VRAMManager.get_optimal_settings() in generate_pro() to cap frames and enable tiled VAE",
+    "Step 6: Apply @vram_guard decorator to generate_pro()",
+    "Step 7: Populate FlowState fields (segment_paths, total_frames, prompts_used, seeds_used) in generate_infinite_flow()",
+    "Step 8: Remove duplicate PYTORCH_CUDA_ALLOC_CONF setting in Cell 3",
+    "Step 9: Add Colab explanation comments to Cell 1 pip/git install lines",
+    "Step 10: Append STORY_QUALITY_KEYWORDS directly to user_input field in decompose_script_to_scenes()"
+  ],
+  "acceptance_criteria": [
+    "ast.parse() succeeds on the final file",
+    "Cell 9 calls generate_infinite_flow() not generate_extended_video()",
+    "blend_into_latent performs actual temporal blending",
+    "_clean_output has 30+ regex patterns matching LTX2EasyPromptLD.py",
+    "Content-tier detection regex present in InlinePromptArchitect.generate()",
+    "VRAMManager output consumed by generate_pro()",
+    "@vram_guard applied to generate_pro()",
+    "FlowState.segment_paths populated from cache directory",
+    "PYTORCH_CUDA_ALLOC_CONF only set once (Cell 1)",
+    "Quality keywords appended to scene user_input field"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('/projects/sandbox/ltx/LTX_PRO.py').read()); print('PASS')\"",
+    "Run: python3 -c \"import ast; tree = ast.parse(open('/projects/sandbox/ltx/LTX_PRO.py').read()); classes = [n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]; funcs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]; required_classes = ['InlinePromptArchitect', 'InlineVisionDescribe', 'VRAMManager', 'AudioSyncEngine', 'PersistentLatentSeed', 'CharacterPromptAnchor', 'CharacterEmbeddingBank', 'SVIProContext']; required_funcs = ['generate_pro', 'generate_infinite_flow', 'run_storyboard', 'run_easy_prompt', 'run_vision_describe', 'decompose_script_to_scenes', 'blend_overlap_frames', 'cleanup_memory', 'aggressive_cleanup']; [assert c in classes for c in required_classes]; [assert f in funcs for f in required_funcs]; print(f'PASS: {len(classes)} classes, {len(funcs)} functions')\""
+  ],
+  "blocked_reason": null,
+  "findings": "All 10 review issues fixed. File grew from 6663 to ~6930 lines. blend_into_latent now performs weighted temporal blending with strength decay. _clean_output expanded from 10 to 30+ patterns. Content-tier detection adds explicit/sensual/neutral handling. VRAMManager caps frames and enables tiled VAE for T4."
+}
