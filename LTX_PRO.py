@@ -632,6 +632,15 @@ class InlinePromptArchitect:
             extras.append("underexposed, dark shadows, black crush")
         if any(w in combined for w in ["close-up", "portrait", "face shot"]):
             extras.append("wide angle distortion, fish eye, full body shot")
+        # Explicit content negatives
+        if any(w in combined for w in ["pussy", "cock", "penis", "vagina", "nude", "naked", "explicit", "nipple", "breast"]):
+            extras.append("censored, mosaic, pixelated, black bar, blurred genitals")
+        # Wide shot negatives
+        if any(w in combined for w in ["wide shot", "wide angle", "aerial", "bird's-eye", "establishing"]):
+            extras.append("close-up, portrait crop, tight frame")
+        # Multi-character negatives
+        if any(w in combined for w in ["two women", "two men", "two people", "both", "together", "couple", "they "]):
+            extras.append("merged bodies, fused figures, incorrect number of people")
         parts = [_NEG_BASE] + extras
         return ", ".join(parts)
 
@@ -1015,7 +1024,9 @@ class PersistentLatentSeed:
                 reference_image = reference_image[0]
             img_data = reference_image.cpu()
         else:
-            img_data = torch.zeros(1)
+            # Non-Tensor input cannot produce a usable noise tensor for blending
+            self._noise_tensor = None
+            return
 
         # Create a hash from the image to detect changes
         new_hash = hash(img_data.sum().item())
@@ -1357,6 +1368,10 @@ OVERLAP_FRAMES_CHARACTER = 8  # @param {type:"integer"}
 
 LATENT_SEED_STRENGTH = 0.15  # @param {type:"number"}
 # How strongly to blend PersistentLatentSeed noise into initial latent.
+
+# Module-level storage for the most recent FlowState from generate_infinite_flow().
+# Cell 9 and subsequent cells can inspect this after generation completes.
+_LAST_FLOW_STATE = None
 
 
 
@@ -5810,6 +5825,10 @@ def generate_infinite_flow(
         # Record the prompt and seed used
         flow_state.prompts_used.append(_user_input or _pos_prompt)
         flow_state.seeds_used.append(config.base_seed)
+
+    # Store the FlowState at module level so Cell 9 and subsequent cells can access it
+    global _LAST_FLOW_STATE
+    _LAST_FLOW_STATE = flow_state
 
     return result
 
