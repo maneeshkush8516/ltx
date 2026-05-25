@@ -1,0 +1,22 @@
+{
+  "project_type": "Google Colab AI video generation pipeline (Python notebook script)",
+  "language": "Python",
+  "build_system": "None (single-file Colab notebook executed cell-by-cell via IPython/Jupyter)",
+  "test_framework": "None (no automated tests - manual visual verification in Colab)",
+  "build_command": "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('AST parse OK')\"",
+  "test_command": "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('Syntax valid')\"",
+  "verification_instructions": "1. Parse the output file with Python AST to confirm syntax validity. 2. Check that all key function definitions exist (generate_pro, generate_extended_video, run_storyboard, run_easy_prompt, etc). 3. Verify integration of EasyPrompt logic by checking for StoryPromptExpander class. 4. Confirm OVERLAP_FRAMES and character consistency mechanisms are present.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - this is a single Python file meant for Google Colab execution",
+  "environment_constraints": "INTEGRATIONS_ONLY network - cannot install packages or access external registries. Must validate via AST parsing only. Cannot run the actual pipeline (requires GPU + ComfyUI). File is ~5600 lines and will grow significantly.",
+  "contribution_requirements": "Single comprehensive Python file output. Clear inline comments. Google Colab cell markers (@title, @markdown). Compatible with T4 GPU 16GB VRAM.",
+  "key_patterns": "ComfyUI node wrapper pattern: NODE_CLASS_MAPPINGS[NodeName]() -> node.FUNCTION(**kwargs). VRAM management via cleanup_memory()/aggressive_cleanup(). Dual-pass generation (half-res Pass1 + 2x upscale Pass2). Character consistency via I2V conditioning + anchor latent blend. SVI-Pro segment extension with overlap blending. LLM prompt expansion via LTX2PromptArchitect wrapper. Config via module-level globals with @param Colab annotations.",
+  "relevant_files": [
+    "LTX_PRO.py",
+    "LTX2EasyPromptLD.py",
+    "LTX2VisionEasyPromptLD.py",
+    "SVI-Pro-Workflow.json",
+    "LD-I2V.json"
+  ],
+  "directory_structure": "Flat repository with 5 files: LTX_PRO.py (main pipeline, 5593 lines), LTX2EasyPromptLD.py (LLM prompt architect, 1064 lines), LTX2VisionEasyPromptLD.py (vision model describe, 232 lines), SVI-Pro-Workflow.json (ComfyUI workflow reference), LD-I2V.json (ComfyUI I2V workflow reference)"
+}
