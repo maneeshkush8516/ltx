@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Strengthen Character Consistency System: Upgrade PersistentLatentSeed with multi-frame temporal anchoring, add OVERLAP_FRAMES_CHARACTER integration into generate_pro() and generate_extended_video(), implement CharacterFeatureExtractor for detailed profile extraction (facial features, body type, hair, age, skin tone, clothing), and add dual-anchor identity persistence across story scenes.",
+  "status": "in_progress",
+  "steps": [
+    "In /projects/sandbox/ltx/LTX_PRO.py, replace the existing PersistentLatentSeed class (around line 1030-1120) with an enhanced version that: (a) supports multi-frame reference (accepts multiple reference images), (b) adds temporal decay with configurable OVERLAP_FRAMES_CHARACTER window, (c) computes frequency-domain features from reference for more stable identity preservation, (d) adds a get_identity_noise() method that returns noise shaped for video latents with per-frame decay weighting.",
+    "Add a new CharacterFeatureExtractor class after CharacterPromptAnchor (around line 1180). This class takes a character image and extracts a structured profile dict with keys: ethnicity_skin_tone, age_estimate, hair_color_style, body_type, clothing_description, distinguishing_features, facial_features. Use the InlineVisionDescribe model to generate this, with a specialized CHARACTER_EXTRACT_PROMPT that outputs structured key:value pairs.",
+    "Enhance the CharacterPromptAnchor class to accept the extracted profile dict and auto-generate a formatted anchor prefix that includes all profile fields. Add a method build_consistency_prefix(profile_dict) that produces: '[Character: {name}. {age}-year-old {ethnicity} {gender}, {hair}, {body_type}, {clothing}, {distinguishing}. Maintain exact appearance throughout.]'",
+    "In generate_pro() (around line 4376), in PHASE 3 (CHARACTER ANCHOR), integrate the enhanced PersistentLatentSeed.blend_into_latent() call with OVERLAP_FRAMES_CHARACTER as the num_frames parameter. Currently blend_into_latent is defined but never called in the pipeline. Wire it into the latent preparation phase after LTXVImgToVideoInplace so the character noise is blended into the first OVERLAP_FRAMES_CHARACTER frames.",
+    "In generate_extended_video() (line 5511), add character identity reinforcement between segments: after extracting the anchor frame for the next segment, also blend PersistentLatentSeed noise into the anchor. Add a config option USE_IDENTITY_REINFORCEMENT (default True) that controls whether the persistent seed noise is re-applied at each segment boundary.",
+    "Add a new global config variable CHARACTER_PROFILE_EXTRACTION = False with @param annotation in Cell 5 (around line 3980). When True and a CHARACTER_IMAGE_PATH is set, auto-extract the character profile at startup and store it in CHARACTER_EXTRACTED_PROFILE. Wire this into the CharacterPromptAnchor so it uses the full profile instead of just CHARACTER_DESCRIPTION."
+  ],
+  "acceptance_criteria": [
+    "python -m py_compile LTX_PRO.py passes without error",
+    "The PersistentLatentSeed class has a blend_into_latent method that accepts num_frames parameter and applies temporal decay",
+    "A CharacterFeatureExtractor class exists with an extract_profile() method",
+    "CharacterPromptAnchor has a build_consistency_prefix() method that uses structured profile data",
+    "generate_pro() calls blend_into_latent with OVERLAP_FRAMES_CHARACTER when character_mode is 'anchor' or 'both'",
+    "generate_extended_video() applies identity reinforcement at segment boundaries",
+    "CHARACTER_PROFILE_EXTRACTION config variable exists in Cell 5 section"
+  ],
+  "verification": [
+    "Run: python -c \"import ast; ast.parse(open('/projects/sandbox/ltx/LTX_PRO.py').read()); print('AST OK')\"",
+    "Run: python -m py_compile /projects/sandbox/ltx/LTX_PRO.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
