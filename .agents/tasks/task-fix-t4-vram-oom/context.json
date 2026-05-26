@@ -1,0 +1,20 @@
+{
+  "project_type": "Python Colab notebook pipeline (ComfyUI-based video generation)",
+  "language": "Python",
+  "build_system": "None (Colab notebook, no formal build system). AST validation via `python -c \"import ast; ast.parse(open('LTX_PRO.py').read())\"` is the primary check.",
+  "test_framework": "No test suite. Verification is AST parse + grep for expected symbols.",
+  "build_command": "python -c \"import ast; ast.parse(open('LTX_PRO.py').read())\"",
+  "test_command": "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); import ast; ast.parse(open('LTX2EasyPromptLD.py').read()); ast.parse(open('LTX2VisionEasyPromptLD.py').read())\"",
+  "verification_instructions": "1. AST parse all .py files. 2. Grep for key function/class names to ensure nothing is broken. 3. Verify new VRAM management functions exist.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - AST validation only.",
+  "environment_constraints": "INTEGRATIONS_ONLY network. Cannot run the actual pipeline (requires GPU + ComfyUI + models). Validation is purely structural (AST parse, grep checks).",
+  "contribution_requirements": "Maintain AST validity across all 3 Python files. Preserve all existing functionality. Changes must be additive and non-breaking.",
+  "key_patterns": "VRAMManager class at line 290. InlinePromptArchitect at line 402 with _unload_model(). InlineVisionDescribe at line 860 with _unload(). cleanup_memory() at line 1400. aggressive_cleanup() at line 1410. run_easy_prompt() at line 1878 calls NODE_CLASS_MAPPINGS['LTX2PromptArchitect']().generate() with keep_model_loaded=False. generate_pro() at line 4241 calls run_easy_prompt then cleanup_memory then DualCLIPLoader. LTX2EasyPromptLD.py uses device_map='auto' which creates accelerate dispatch hooks that survive .to('cpu'). LTX2VisionEasyPromptLD.py uses same device_map='auto' pattern.",
+  "relevant_files": [
+    "LTX_PRO.py",
+    "LTX2EasyPromptLD.py",
+    "LTX2VisionEasyPromptLD.py"
+  ],
+  "directory_structure": "/projects/sandbox/ltx/ contains: LTX_PRO.py (6918 lines, main pipeline), LTX2EasyPromptLD.py (ComfyUI prompt node), LTX2VisionEasyPromptLD.py (ComfyUI vision node), LD-I2V.json (workflow), SVI-Pro-Workflow.json (workflow)"
+}

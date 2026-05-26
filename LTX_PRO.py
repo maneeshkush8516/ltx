@@ -373,6 +373,40 @@ class VRAMManager:
         pct = used / self.total_vram_gb * 100
         print(f"   VRAM: {used:.1f}/{self.total_vram_gb:.1f} GB ({pct:.0f}%) [{self.gpu_name}]")
 
+    def enforce_sequential_loading(self, stage: str, required_gb: float) -> None:
+        """Ensure enough VRAM is free for the next stage. Force-unload if needed."""
+        if not torch.cuda.is_available():
+            return
+        available = self.get_available_vram()
+        if available >= required_gb:
+            return
+
+        print(f"   [{stage}] Need {required_gb:.1f} GB, only {available:.1f} GB free. Force-unloading...")
+        force_unload_all_models()
+        aggressive_cleanup(f"{stage} pre-load")
+
+        available = self.get_available_vram()
+        if available < required_gb:
+            # Second attempt
+            time.sleep(0.5)
+            gc.collect()
+            gc.collect()
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+            available = self.get_available_vram()
+
+        if available < required_gb:
+            raise RuntimeError(
+                f"[{stage}] Cannot free enough VRAM. Need {required_gb:.1f} GB, "
+                f"only {available:.1f} GB available after force cleanup. "
+                f"Total VRAM: {self.total_vram_gb:.1f} GB [{self.gpu_name}].\n"
+                f"  Fix: Ensure previous models are fully unloaded before loading {stage}."
+            )
+        print(f"   [{stage}] OK: {available:.1f} GB free (need {required_gb:.1f} GB)")
+
 
 def vram_guard(func):
     """Decorator that catches OOM errors, clears cache, and retries once."""
@@ -478,6 +512,33 @@ class InlinePromptArchitect:
     def _unload_model(self):
         """Unload model and free VRAM."""
         if self.model is not None:
+            # Remove accelerate dispatch hooks (they hold CUDA tensor references)
+            try:
+                from accelerate.hooks import remove_hook_from_module
+                remove_hook_from_module(self.model, recurse=True)
+            except Exception:
+                pass
+
+            # Delete _hf_hook if present
+            try:
+                if hasattr(self.model, '_hf_hook'):
+                    del self.model._hf_hook
+            except Exception:
+                pass
+
+            # Explicitly move all parameters and buffers to CPU
+            try:
+                for p in self.model.parameters():
+                    if p.device.type == 'cuda':
+                        p.data = p.data.cpu()
+                        if p.grad is not None:
+                            p.grad = p.grad.cpu()
+                for b in self.model.buffers():
+                    if b.device.type == 'cuda':
+                        b.data = b.data.cpu()
+            except Exception:
+                pass
+
             try:
                 self.model.to("cpu")
             except Exception:
@@ -488,8 +549,17 @@ class InlinePromptArchitect:
         self.tokenizer = None
         self.loaded_model_key = None
         gc.collect()
+        gc.collect()
+        gc.collect()
         if torch.cuda.is_available():
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+            time.sleep(0.1)
+            gc.collect()
+            torch.cuda.empty_cache()
+            allocated_mb = torch.cuda.memory_allocated() / 1024**2
+            print(f"   [InlinePromptArchitect] Unloaded. VRAM allocated: {allocated_mb:.0f} MB")
 
     @staticmethod
     def _clean_output(text):
@@ -894,6 +964,33 @@ class InlineVisionDescribe:
     def _unload(self):
         """Unload model and free VRAM."""
         if self.model is not None:
+            # Remove accelerate dispatch hooks (they hold CUDA tensor references)
+            try:
+                from accelerate.hooks import remove_hook_from_module
+                remove_hook_from_module(self.model, recurse=True)
+            except Exception:
+                pass
+
+            # Delete _hf_hook if present
+            try:
+                if hasattr(self.model, '_hf_hook'):
+                    del self.model._hf_hook
+            except Exception:
+                pass
+
+            # Explicitly move all parameters and buffers to CPU
+            try:
+                for p in self.model.parameters():
+                    if p.device.type == 'cuda':
+                        p.data = p.data.cpu()
+                        if p.grad is not None:
+                            p.grad = p.grad.cpu()
+                for b in self.model.buffers():
+                    if b.device.type == 'cuda':
+                        b.data = b.data.cpu()
+            except Exception:
+                pass
+
             try:
                 self.model.to("cpu")
             except Exception:
@@ -902,10 +999,17 @@ class InlineVisionDescribe:
         self.processor = None
         self.source = None
         gc.collect()
+        gc.collect()
+        gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+            time.sleep(0.1)
+            gc.collect()
+            torch.cuda.empty_cache()
+            allocated_mb = torch.cuda.memory_allocated() / 1024**2
+            print(f"   [InlineVisionDescribe] Unloaded. VRAM allocated: {allocated_mb:.0f} MB")
 
     def describe(self, image_tensor, model_key="3B-fast", offline_mode=False, local_path=""):
         """
@@ -1397,26 +1501,87 @@ def import_custom_nodes() -> None:
         asyncio.get_event_loop().run_until_complete(_load())
 
 # ── VRAM helpers ──────────────────────────────────────────────────────────────
-def cleanup_memory(verbose: bool = False) -> None:
+def cleanup_memory(verbose: bool = False, force: bool = False) -> None:
     """Enhanced memory cleanup including ipc_collect for fragmentation."""
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()   # free IPC handles - reduces fragmentation
-    if verbose:
-        _print_vram()
-
-def aggressive_cleanup(label: str = "") -> None:
-    """Aggressive VRAM cleanup: double gc + synchronize + empty_cache + ipc_collect."""
+    gc.collect()
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
+    if force:
+        time.sleep(0.1)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    if verbose:
+        _print_vram()
+
+def aggressive_cleanup(label: str = "") -> None:
+    """Aggressive VRAM cleanup: triple gc + synchronize + empty_cache + ipc_collect + sleep."""
     gc.collect()
+    gc.collect()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+    time.sleep(0.1)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     if label:
         _print_vram(label)
+    # Warn if VRAM is still unexpectedly high
+    if torch.cuda.is_available():
+        allocated_gb = torch.cuda.memory_allocated() / 1024**3
+        if allocated_gb > 2.0:
+            print(f"   WARNING: {allocated_gb:.1f} GB still allocated after cleanup [{label}]")
+
+def force_unload_all_models() -> None:
+    """Nuclear option: walk all Python objects and forcibly unload any HF model on CUDA."""
+    try:
+        from transformers import PreTrainedModel
+    except ImportError:
+        return
+
+    unloaded = 0
+    for obj in gc.get_objects():
+        if isinstance(obj, PreTrainedModel):
+            try:
+                # Check if any parameter is on CUDA
+                has_cuda = any(p.device.type == 'cuda' for p in obj.parameters())
+                if not has_cuda:
+                    continue
+                # Remove accelerate hooks
+                try:
+                    from accelerate.hooks import remove_hook_from_module
+                    remove_hook_from_module(obj, recurse=True)
+                except Exception:
+                    pass
+                # Move all params to CPU
+                for p in obj.parameters():
+                    if p.device.type == 'cuda':
+                        p.data = p.data.cpu()
+                        if p.grad is not None:
+                            p.grad = p.grad.cpu()
+                for b in obj.buffers():
+                    if b.device.type == 'cuda':
+                        b.data = b.data.cpu()
+                unloaded += 1
+            except Exception:
+                pass
+
+    if unloaded > 0:
+        print(f"   force_unload_all_models: moved {unloaded} model(s) to CPU")
+    gc.collect()
+    gc.collect()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 def _print_vram(label: str = "") -> None:
     if not torch.cuda.is_available():
@@ -4511,8 +4676,30 @@ def generate_pro(
     else:
         print("   [EasyPrompt] Bypassed — using manual POSITIVE_PROMPT.")
 
-    # LLM/Vision should now be unloaded — free VRAM before loading video model
-    cleanup_memory(verbose=True)
+    # LLM/Vision should now be unloaded — aggressive VRAM cleanup before CLIP
+    print("\n   Aggressive VRAM cleanup (pre-CLIP)...")
+    force_unload_all_models()
+    aggressive_cleanup("pre-CLIP cleanup")
+
+    # Verify VRAM is actually freed
+    if torch.cuda.is_available():
+        _allocated = torch.cuda.memory_allocated() / 1024**3
+        if _allocated > 2.0:
+            print(f"   WARNING: {_allocated:.1f} GB still allocated! Retrying cleanup...")
+            force_unload_all_models()
+            cleanup_memory(force=True)
+            aggressive_cleanup("pre-CLIP retry")
+            _allocated = torch.cuda.memory_allocated() / 1024**3
+            if _allocated > 2.0:
+                print(f"   CRITICAL: {_allocated:.1f} GB still in use after double cleanup!")
+
+    _print_vram()
+
+    # Enforce sequential loading for T4
+    if _VRAM_MGR.is_t4:
+        _VRAM_MGR.enforce_sequential_loading("CLIP", 12.0)
+    else:
+        _VRAM_MGR.enforce_sequential_loading("CLIP", 8.0)
 
     # ══════════════════════════════════════════════════════════════════════
     # PHASE 1A - TEXT ENCODING (CLIP loaded, used, then freed before UNet)
@@ -4582,6 +4769,10 @@ def generate_pro(
         # Delete CLIP now - frees ~6-8 GB for UNet
         del clip_model
         aggressive_cleanup("CLIP deleted")
+
+        # Verify CLIP is fully freed before UNet
+        if _VRAM_MGR.is_t4:
+            _VRAM_MGR.enforce_sequential_loading("UNet", 6.0)
 
         # ══════════════════════════════════════════════════════════════════
         # PHASE 1B - UNET LOADING (after CLIP is freed from VRAM)

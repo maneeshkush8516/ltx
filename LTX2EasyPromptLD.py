@@ -287,6 +287,33 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
 
     def unload_model(self):
         if self.model is not None:
+            # Remove accelerate dispatch hooks (they hold CUDA tensor references)
+            try:
+                from accelerate.hooks import remove_hook_from_module
+                remove_hook_from_module(self.model, recurse=True)
+            except Exception:
+                pass
+
+            # Delete _hf_hook if present
+            try:
+                if hasattr(self.model, '_hf_hook'):
+                    del self.model._hf_hook
+            except Exception:
+                pass
+
+            # Explicitly move all parameters and buffers to CPU
+            try:
+                for p in self.model.parameters():
+                    if p.device.type == 'cuda':
+                        p.data = p.data.cpu()
+                        if p.grad is not None:
+                            p.grad = p.grad.cpu()
+                for b in self.model.buffers():
+                    if b.device.type == 'cuda':
+                        b.data = b.data.cpu()
+            except Exception as e:
+                print(f"[LTX2] Warning: explicit param move failed: {e}")
+
             try:
                 self.model.to("cpu")
             except Exception as e:
@@ -307,11 +334,20 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
         self.loaded_model_key = None
 
         gc.collect()
+        gc.collect()
+        gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
-        print("[LTX2] Model unloaded.")
+            torch.cuda.ipc_collect()
+            import time
+            time.sleep(0.1)
+            gc.collect()
+            torch.cuda.empty_cache()
+            allocated_mb = torch.cuda.memory_allocated() / 1024**2
+            print(f"[LTX2] Model unloaded. VRAM still allocated: {allocated_mb:.0f} MB")
+        else:
+            print("[LTX2] Model unloaded.")
 
     @staticmethod
     def _clean_output(text: str) -> str:

@@ -1,0 +1,7 @@
+{
+  "task_id": "task-fix-t4-vram-oom",
+  "task_description": "Fix CUDA OOM errors on T4 GPU during text encoding step. The LLM (3B model loaded with device_map='auto') is not properly freed from VRAM after prompt expansion, leaving 13GB allocated when DualCLIPLoader tries to load the Gemma 3 12B fp8 text encoder. The fix involves aggressive VRAM cleanup with accelerate hook removal, triple garbage collection, VRAM verification checkpoints, and enforced sequential model loading.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

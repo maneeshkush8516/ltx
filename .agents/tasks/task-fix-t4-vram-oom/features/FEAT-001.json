@@ -1,0 +1,43 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix CUDA OOM on T4 by implementing aggressive VRAM cleanup after LLM/Vision model unloading and adding VRAM verification checkpoints. The root cause is that device_map='auto' from accelerate creates dispatch hooks that survive .to('cpu') + del, leaving ~13GB of VRAM still allocated after the LLM is supposedly unloaded. The fix must address three files: LTX2EasyPromptLD.py, LTX2VisionEasyPromptLD.py, and LTX_PRO.py.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: Fix LTX2EasyPromptLD.py unload_model() (line 288). The current approach does model.to('cpu') then del model, but device_map='auto' from accelerate attaches dispatch hooks holding CUDA references. The fix: (a) Before .to('cpu'), call accelerate.hooks.remove_hook_from_module(model, recurse=True) if available. (b) Iterate all model parameters and buffers and move them to CPU explicitly: for p in model.parameters(): p.data = p.data.cpu(); if p.grad: p.grad = p.grad.cpu(). (c) Delete model._hf_hook if it exists. (d) After del model/tokenizer, call gc.collect() THREE times (needed for cyclic refs), then torch.cuda.synchronize(), torch.cuda.empty_cache(), torch.cuda.ipc_collect(). (e) Add a verification print of torch.cuda.memory_allocated() after cleanup to confirm <500MB used.",
+    "Step 2: Fix LTX2VisionEasyPromptLD.py unload section (line 207-221). Same device_map='auto' problem as the prompt node. Apply the same accelerate hook removal + explicit parameter CPU move + triple gc + verification pattern. The _INSTANCE['model'] global dict pattern needs special handling: set _INSTANCE['model'] = None AFTER all cleanup steps.",
+    "Step 3: Fix InlinePromptArchitect._unload_model() in LTX_PRO.py (line 478). This is the fallback path when ComfyUI nodes are not available. Apply same pattern: accelerate hook removal, explicit param move, triple gc, synchronize, empty_cache, ipc_collect, verification print.",
+    "Step 4: Fix InlineVisionDescribe._unload() in LTX_PRO.py (line 895). Same fix pattern as Step 3.",
+    "Step 5: Enhance cleanup_memory() in LTX_PRO.py (line 1400) to be more aggressive by default. Add triple gc.collect(), and add a 'force' parameter that when True also calls torch.cuda.reset_peak_memory_stats() and prints memory state.",
+    "Step 6: Enhance aggressive_cleanup() in LTX_PRO.py (line 1410) to add: (a) triple gc.collect(), (b) torch.cuda.ipc_collect(), (c) a brief time.sleep(0.1) to allow CUDA runtime to reclaim, (d) verification assertion that memory_allocated < threshold (warn-only, don't crash).",
+    "Step 7: Add a new function force_unload_all_models() in LTX_PRO.py near line 1430 that walks gc.get_objects() looking for any transformers model instances still holding CUDA tensors (checking for PreTrainedModel with parameters on cuda) and forcibly moves them to CPU and deletes them. This is the nuclear option called between pipeline stages.",
+    "Step 8: In generate_pro() at line 4515 (between LLM/Vision cleanup and DualCLIPLoader), replace the simple 'cleanup_memory(verbose=True)' call with: (a) force_unload_all_models(), (b) aggressive_cleanup('pre-CLIP VRAM verification'), (c) a VRAM check: if torch.cuda.memory_allocated() > 2 * 1024**3 (2GB), print a WARNING and call force_unload_all_models() again followed by another aggressive_cleanup, (d) print the actual VRAM state before proceeding to CLIP load.",
+    "Step 9: Add a VRAM verification checkpoint after CLIP encoding and deletion (after line 4584 'aggressive_cleanup(CLIP deleted)'). Check that VRAM is below 4GB before loading UNet. If not, call force_unload_all_models() + aggressive_cleanup again.",
+    "Step 10: In VRAMManager class (line 290), add a method enforce_sequential_loading(self, stage: str, required_gb: float) that checks can_fit(required_gb) and if not, calls force_unload_all_models() + aggressive_cleanup, then re-checks. If still cannot fit, raises a RuntimeError with a clear message about which models are still in VRAM.",
+    "Step 11: In generate_pro(), before DualCLIPLoader (line 4523), add a call to _VRAM_MGR.enforce_sequential_loading('CLIP', 12.0 if _VRAM_MGR.is_t4 else 8.0) to enforce that enough VRAM is available. Before UNet loading, add _VRAM_MGR.enforce_sequential_loading('UNet', 6.0)."
+  ],
+  "acceptance_criteria": [
+    "All 3 Python files pass AST validation (python -c 'import ast; ast.parse(open(file).read())')",
+    "LTX2EasyPromptLD.py unload_model() contains accelerate hook removal logic (try/except guarded)",
+    "LTX2VisionEasyPromptLD.py unload section contains accelerate hook removal logic",
+    "LTX_PRO.py InlinePromptArchitect._unload_model() contains accelerate hook removal and triple gc.collect()",
+    "LTX_PRO.py InlineVisionDescribe._unload() contains accelerate hook removal and triple gc.collect()",
+    "LTX_PRO.py contains force_unload_all_models() function",
+    "LTX_PRO.py generate_pro() has VRAM verification checkpoint between LLM cleanup and CLIP load",
+    "LTX_PRO.py generate_pro() has VRAM verification checkpoint between CLIP deletion and UNet load",
+    "VRAMManager class has enforce_sequential_loading() method",
+    "cleanup_memory() and aggressive_cleanup() include triple gc.collect() calls"
+  ],
+  "verification": [
+    "python -c \"import ast; ast.parse(open('/projects/sandbox/ltx/LTX_PRO.py').read()); print('LTX_PRO.py: OK')\"",
+    "python -c \"import ast; ast.parse(open('/projects/sandbox/ltx/LTX2EasyPromptLD.py').read()); print('LTX2EasyPromptLD.py: OK')\"",
+    "python -c \"import ast; ast.parse(open('/projects/sandbox/ltx/LTX2VisionEasyPromptLD.py').read()); print('LTX2VisionEasyPromptLD.py: OK')\"",
+    "grep -n 'remove_hook_from_module' /projects/sandbox/ltx/LTX2EasyPromptLD.py",
+    "grep -n 'remove_hook_from_module' /projects/sandbox/ltx/LTX2VisionEasyPromptLD.py",
+    "grep -n 'force_unload_all_models' /projects/sandbox/ltx/LTX_PRO.py",
+    "grep -n 'enforce_sequential_loading' /projects/sandbox/ltx/LTX_PRO.py",
+    "grep -c 'gc.collect()' /projects/sandbox/ltx/LTX_PRO.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

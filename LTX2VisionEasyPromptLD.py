@@ -206,19 +206,58 @@ class LTX2VisionDescribe:
 
         # ── Unload immediately to free VRAM for the text node ─────────────────
         print("[VisionDescribe] Unloading to free VRAM...")
-        try:
-            _INSTANCE["model"].to("cpu")
-        except Exception:
-            pass
+
+        # Remove accelerate dispatch hooks (they hold CUDA tensor references)
+        if _INSTANCE["model"] is not None:
+            try:
+                from accelerate.hooks import remove_hook_from_module
+                remove_hook_from_module(_INSTANCE["model"], recurse=True)
+            except Exception:
+                pass
+
+            # Delete _hf_hook if present
+            try:
+                if hasattr(_INSTANCE["model"], '_hf_hook'):
+                    del _INSTANCE["model"]._hf_hook
+            except Exception:
+                pass
+
+            # Explicitly move all parameters and buffers to CPU
+            try:
+                for p in _INSTANCE["model"].parameters():
+                    if p.device.type == 'cuda':
+                        p.data = p.data.cpu()
+                        if p.grad is not None:
+                            p.grad = p.grad.cpu()
+                for b in _INSTANCE["model"].buffers():
+                    if b.device.type == 'cuda':
+                        b.data = b.data.cpu()
+            except Exception:
+                pass
+
+            try:
+                _INSTANCE["model"].to("cpu")
+            except Exception:
+                pass
+
         _INSTANCE["model"]     = None
         _INSTANCE["processor"] = None
         _INSTANCE["source"]    = None
         gc.collect()
+        gc.collect()
+        gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
-        print("[VisionDescribe] VRAM cleared.")
+            torch.cuda.ipc_collect()
+            import time
+            time.sleep(0.1)
+            gc.collect()
+            torch.cuda.empty_cache()
+            allocated_mb = torch.cuda.memory_allocated() / 1024**2
+            print(f"[VisionDescribe] VRAM cleared. Still allocated: {allocated_mb:.0f} MB")
+        else:
+            print("[VisionDescribe] VRAM cleared.")
 
         return (description,)
 
