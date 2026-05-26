@@ -1,0 +1,21 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "P2 Quality fix: Replace InlinePromptArchitect.SYSTEM_PROMPT with the full detailed version from LTX2EasyPromptLD.py (the canonical source)",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: Read the full SYSTEM_PROMPT from LTX2EasyPromptLD.py (lines 164-201). It is a triple-quoted string starting with 'You are a cinematic prompt writer for LTX-2...' and ending with '...Begin immediately with the video style or shot description.'",
+    "Step 2: In LTX_PRO.py, replace the InlinePromptArchitect.SYSTEM_PROMPT (lines 452-474) - which is currently a parenthesized string concatenation - with the full triple-quoted version from LTX2EasyPromptLD.py. The full version includes: PRIORITY ORDER with detailed character description rules, UNDRESSING RULE, camera movement as prose rules, audio/dialogue prose rules, WRITING RULES, and IMPORTANT output rules. Keep the class attribute assignment format: 'SYSTEM_PROMPT = \"\"\"...(full content)...\"\"\"'"
+  ],
+  "acceptance_criteria": [
+    "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\" passes",
+    "InlinePromptArchitect.SYSTEM_PROMPT contains 'UNDRESSING RULE' (a key section from the full prompt)",
+    "InlinePromptArchitect.SYSTEM_PROMPT contains 'Begin immediately with the video style or shot description.' (the final line)",
+    "InlinePromptArchitect.SYSTEM_PROMPT contains 'DIALOGUE INSTRUCTION' (another key section from full prompt)"
+  ],
+  "verification": [
+    "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
