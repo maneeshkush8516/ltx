@@ -539,6 +539,113 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
         re.IGNORECASE,
     )
 
+    # ── Tier-detection regex patterns (compiled once at class level) ──────
+    _EXPLICIT_RE = re.compile(
+        r"\b(pussy|cock|dick|penis|vagina|clit|clitoris|anus|asshole|"
+        r"tits|cum|jizz|squirt\w*|creampie|orgasm|fuck|fucking|"
+        r"blowjob|handjob|bj|hj|breed\w*|bareback|raw\s+dog|"
+        r"balls|ballsack|taint|penetrat\w*|thrust\w*)\b",
+        re.IGNORECASE,
+    )
+    _SENSUAL_RE = re.compile(
+        r"\b(naked|nude|topless|undress\w*|strip\w*|takes?\s+off|"
+        r"removes?\s+(her|his|their|the)?\s*\w*\s*"
+        r"(shirt|dress|top|bra|pants|jeans|clothes|clothing|outfit|underwear|skirt|jacket|coat|robe)|"
+        r"disrobe\w*|unbutton\w*|unzip\w*|peels?\s+off|pulls?\s+off|"
+        r"shed\w*\s+(her|his|their)?\s*(clothes|clothing|shirt|dress)|"
+        r"titty\s+drop|titties\s+out|flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
+        r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs)|"
+        r"sensual|erotic|intimate|lingerie|bare\s+skin|bare\s+body|"
+        r"braless|pantyless|commando|see.through|sheer|"
+        r"bath\w*|shower\w*|changing|bikini|thong|g.string|"
+        r"getting\s+(dressed|undressed|naked)|"
+        r"body\s+paint\w*|titty|titties|titty\s+drop|boobs|"
+        r"flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
+        r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs))\b",
+        re.IGNORECASE,
+    )
+    _UNDRESS_RE = re.compile(
+        r"\b(undress\w*|strip\w*|takes?\s+off|"
+        r"removes?\s+(her|his|their|the)?\s*\w*\s*"
+        r"(shirt|dress|top|bra|pants|jeans|clothes|clothing|outfit|underwear|skirt|jacket|coat|robe)|"
+        r"disrobe\w*|unbutton\w*|unzip\w*|peels?\s+off|pulls?\s+off|"
+        r"shed\w*\s+(her|his|their)?\s*(clothes|clothing|shirt|dress)|"
+        r"titty\s+drop|titties\s+out|flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
+        r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs)|"
+        r"slips?\s+out\s+of|shrugs?\s+off|steps?\s+out\s+of|"
+        r"tears?\s+off|rips?\s+off|tugs?\s+down|pulls?\s+down|pushes?\s+down|"
+        r"lifts?\s+(her|his)\s+(shirt|top|dress)|raises?\s+(her|his)\s+(dress|skirt)|"
+        r"unhooks?|unclasps?|slides?\s+off|slips?\s+off|wriggles?\s+out\s+of|"
+        r"buttons?\s+open|pops?\s+the\s+buttons?|rolls?\s+down|"
+        r"still\s+dressed|fully\s+clothed|in\s+(her|his)\s+clothes|"
+        r"gets?\s+undressed|gets?\s+naked|becomes?\s+naked)\b",
+        re.IGNORECASE,
+    )
+    _ALREADY_NAKED_RE = re.compile(
+        r"\b(naked|nude|topless|bare|undressed|"
+        r"in\s+nothing\s+but|wearing\s+only|only\s+wearing|"
+        r"just\s+out\s+of\s+the\s+shower|fresh\s+out\s+of\s+the\s+shower|"
+        r"wrapped\s+in\s+a\s+towel|just\s+woke\s+up|waking\s+up)\b",
+        re.IGNORECASE,
+    )
+    _CLOTHING_RE = re.compile(
+        r"\b(wearing|dressed\s+in|clothed|shirt|dress|top|bra|pants|jeans|"
+        r"skirt|blouse|jacket|coat|robe|lingerie|underwear|outfit|clothes|"
+        r"gets?\s+naked|becomes?\s+naked|strip\w*|undress\w*|takes?\s+off)\b",
+        re.IGNORECASE,
+    )
+    _MID_ACTION_RE = re.compile(
+        r"\b(rubbing|touching|fingering|riding|sucking|licking|stroking|"
+        r"grinding|bouncing|moaning|climax\w*|orgasm\w*|masturbat\w*|"
+        r"already\s+naked|already\s+nude|already\s+undressed|"
+        r"in\s+bed|on\s+the\s+bed|on\s+her\s+knees|on\s+his\s+knees|"
+        r"spread\s+(her|his)\s+legs?|legs?\s+spread|her\s+legs\s+open|"
+        r"sitting\s+on\s+(him|her|his|a)|"
+        r"from\s+behind|doggy\s*style|doggy|"
+        r"legs?\s+wrapped\s+around|wrapped\s+(her|his)\s+legs?|"
+        r"on\s+top\s+of\s+(him|her)|between\s+(her|his)\s+legs?|"
+        r"mid.sex|mid.act|mid.scene|after\s+sex|post.sex|"
+        r"lying\s+(there|naked|nude)|bare\s+(back|chest|skin|legs?|arms?)|"
+        r"exposed\s+(skin|body|chest|back)|"
+        r"sunbath\w*|posing\s+(nude|naked)|"
+        r"inside\s+(her|him)|penetrat\w*)\b",
+        re.IGNORECASE,
+    )
+    _FLASH_RE = re.compile(
+        r"\b(titty\s+drop|titties\s+out|"
+        r"flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
+        r"lift\w*\s+(her|his)?\s*(top|shirt)|"
+        r"show\w*\s+(her|his)?\s*(tits|titties|boobs))\b",
+        re.IGNORECASE,
+    )
+    _SEQUENCE_RE = re.compile(r"^\s*(\d+[\.\):])\s+.+", re.MULTILINE)
+    _PERSON_RE = re.compile(
+        r"\b(he|she|his|her|him|they|them|their|man|men|woman|women|girl|girls|boy|boys|guy|guys|"
+        r"person|people|couple|figure|character|actress|actor|"
+        r"someone|anybody|stranger|friend|lover|wife|husband|partner|spouse|"
+        r"boyfriend|girlfriend|teenager|teenagers|adult|adults|female|male|"
+        r"blonde|brunette|redhead|nude|naked|"
+        r"singer|dancer|performer|athlete|soldier|worker|"
+        r"player|nurse|doctor|student|teacher|child|children|kid|kids|"
+        r"crowd|audience|escort|mistress|dominatrix|sub|submissive|"
+        r"friends|friend|group|gang|party|crew|team|pair|duo)\b",
+        re.IGNORECASE,
+    )
+    _MULTI_RE = re.compile(
+        r"\b(two\s+(women|men|people|girls|guys|characters|figures)|"
+        r"both\s+(of\s+them|women|men|girls|guys)|"
+        r"(she|he)\s+and\s+(she|he|her|him)|"
+        r"(a\s+man\s+and\s+a\s+woman|a\s+woman\s+and\s+a\s+man)|"
+        r"couple|trio|they\s+(kiss|touch|embrace|undress|fuck|have))\b",
+        re.IGNORECASE,
+    )
+    _STATIC_RE = re.compile(
+        r"\b(static|locked.off|locked off|fixed|stationary|no camera movement|"
+        r"camera still|still camera|camera locked|tripod shot|tripod|"
+        r"fixed camera|fixed shot|static shot|static camera)\b",
+        re.IGNORECASE,
+    )
+
     def __init__(self):
         self.tokenizer = None
         self.model = None
@@ -571,6 +678,12 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
         self.model.eval()
         self.loaded_model_key = model_key
 
+        # Register LLM stage in VRAMManager for offload tracking
+        try:
+            _VRAM_MGR.register_stage("LLM", 8.0 if "14B" in model_key else 5.0)
+        except Exception:
+            pass  # VRAMManager may not be initialized yet
+
     def _unload_model(self):
         """Unload model and free VRAM."""
         if self.model is not None:
@@ -580,6 +693,11 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
         self.model = None
         self.tokenizer = None
         self.loaded_model_key = None
+        # Release LLM stage from VRAMManager
+        try:
+            _VRAM_MGR.release_stage("LLM")
+        except Exception:
+            pass
 
     @staticmethod
     def _clean_output(text):
@@ -842,95 +960,26 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
         # Includes all regex patterns and undressing segment enforcement
         # ══════════════════════════════════════════════════════════════════
 
-        # Tier 3 triggers: direct anatomical / act terms
-        _explicit_re = re.compile(
-            r"\b(pussy|cock|dick|penis|vagina|clit|clitoris|anus|asshole|"
-            r"tits|cum|jizz|squirt\w*|creampie|orgasm|fuck|fucking|"
-            r"blowjob|handjob|bj|hj|breed\w*|bareback|raw\s+dog|"
-            r"balls|ballsack|taint|penetrat\w*|thrust\w*)\b",
-            re.IGNORECASE,
-        )
-
-        # Tier 2 triggers: nudity/sensuality implied but not explicit
-        _sensual_re = re.compile(
-            r"\b(naked|nude|topless|undress\w*|strip\w*|takes?\s+off|"
-            r"removes?\s+(her|his|their|the)?\s*\w*\s*"
-            r"(shirt|dress|top|bra|pants|jeans|clothes|clothing|outfit|underwear|skirt|jacket|coat|robe)|"
-            r"disrobe\w*|unbutton\w*|unzip\w*|peels?\s+off|pulls?\s+off|"
-            r"shed\w*\s+(her|his|their)?\s*(clothes|clothing|shirt|dress)|"
-            r"titty\s+drop|titties\s+out|flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
-            r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs)|"
-            r"sensual|erotic|intimate|lingerie|bare\s+skin|bare\s+body|"
-            r"braless|pantyless|commando|see.through|sheer|"
-            r"bath\w*|shower\w*|changing|bikini|thong|g.string|"
-            r"getting\s+(dressed|undressed|naked)|"
-            r"body\s+paint\w*|titty|titties|titty\s+drop|boobs|"
-            r"flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
-            r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs))\b",
-            re.IGNORECASE,
-        )
+        # Tier 3 triggers: direct anatomical / act terms (class-level compiled)
+        _explicit_re = self._EXPLICIT_RE
+        # Tier 2 triggers: nudity/sensuality implied but not explicit (class-level compiled)
+        _sensual_re = self._SENSUAL_RE
 
         is_explicit = bool(_explicit_re.search(user_input))
         is_sensual = bool(_sensual_re.search(user_input)) and not is_explicit
 
         # Undressing detection for mandatory segment rule in tier 2 and tier 3
-        _undress_re = re.compile(
-            r"\b(undress\w*|strip\w*|takes?\s+off|"
-            r"removes?\s+(her|his|their|the)?\s*\w*\s*"
-            r"(shirt|dress|top|bra|pants|jeans|clothes|clothing|outfit|underwear|skirt|jacket|coat|robe)|"
-            r"disrobe\w*|unbutton\w*|unzip\w*|peels?\s+off|pulls?\s+off|"
-            r"shed\w*\s+(her|his|their)?\s*(clothes|clothing|shirt|dress)|"
-            r"titty\s+drop|titties\s+out|flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
-            r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs)|"
-            r"slips?\s+out\s+of|shrugs?\s+off|steps?\s+out\s+of|"
-            r"tears?\s+off|rips?\s+off|tugs?\s+down|pulls?\s+down|pushes?\s+down|"
-            r"lifts?\s+(her|his)\s+(shirt|top|dress)|raises?\s+(her|his)\s+(dress|skirt)|"
-            r"unhooks?|unclasps?|slides?\s+off|slips?\s+off|wriggles?\s+out\s+of|"
-            r"buttons?\s+open|pops?\s+the\s+buttons?|rolls?\s+down|"
-            r"still\s+dressed|fully\s+clothed|in\s+(her|his)\s+clothes|"
-            r"gets?\s+undressed|gets?\s+naked|becomes?\s+naked)\b",
-            re.IGNORECASE,
-        )
-        has_undressing = bool(_undress_re.search(user_input))
+        # (class-level compiled patterns)
+        has_undressing = bool(self._UNDRESS_RE.search(user_input))
 
         # Already-naked detection - subject starts the scene undressed
-        _already_naked_re = re.compile(
-            r"\b(naked|nude|topless|bare|undressed|"
-            r"in\s+nothing\s+but|wearing\s+only|only\s+wearing|"
-            r"just\s+out\s+of\s+the\s+shower|fresh\s+out\s+of\s+the\s+shower|"
-            r"wrapped\s+in\s+a\s+towel|just\s+woke\s+up|waking\s+up)\b",
-            re.IGNORECASE,
-        )
-        _clothing_re = re.compile(
-            r"\b(wearing|dressed\s+in|clothed|shirt|dress|top|bra|pants|jeans|"
-            r"skirt|blouse|jacket|coat|robe|lingerie|underwear|outfit|clothes|"
-            r"gets?\s+naked|becomes?\s+naked|strip\w*|undress\w*|takes?\s+off)\b",
-            re.IGNORECASE,
-        )
         is_already_naked = (
-            bool(_already_naked_re.search(user_input)) and
-            not bool(_clothing_re.search(user_input))
+            bool(self._ALREADY_NAKED_RE.search(user_input)) and
+            not bool(self._CLOTHING_RE.search(user_input))
         )
 
         # Mid-action detection - scene already in progress
-        _mid_action_re = re.compile(
-            r"\b(rubbing|touching|fingering|riding|sucking|licking|stroking|"
-            r"grinding|bouncing|moaning|climax\w*|orgasm\w*|masturbat\w*|"
-            r"already\s+naked|already\s+nude|already\s+undressed|"
-            r"in\s+bed|on\s+the\s+bed|on\s+her\s+knees|on\s+his\s+knees|"
-            r"spread\s+(her|his)\s+legs?|legs?\s+spread|her\s+legs\s+open|"
-            r"sitting\s+on\s+(him|her|his|a)|"
-            r"from\s+behind|doggy\s*style|doggy|"
-            r"legs?\s+wrapped\s+around|wrapped\s+(her|his)\s+legs?|"
-            r"on\s+top\s+of\s+(him|her)|between\s+(her|his)\s+legs?|"
-            r"mid.sex|mid.act|mid.scene|after\s+sex|post.sex|"
-            r"lying\s+(there|naked|nude)|bare\s+(back|chest|skin|legs?|arms?)|"
-            r"exposed\s+(skin|body|chest|back)|"
-            r"sunbath\w*|posing\s+(nude|naked)|"
-            r"inside\s+(her|him)|penetrat\w*)\b",
-            re.IGNORECASE,
-        )
-        is_mid_action = bool(_mid_action_re.search(user_input)) or is_already_naked
+        is_mid_action = bool(self._MID_ACTION_RE.search(user_input)) or is_already_naked
 
         # If mid-action or already naked, never fire the undressing segment
         if is_mid_action:
@@ -956,15 +1005,8 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
                 "Describe body parts, positions, and physical actions with blunt, specific language.]"
             )
         elif is_sensual:
-            # Detect flash/titty-drop specifically
-            _flash_re = re.compile(
-                r"\b(titty\s+drop|titties\s+out|"
-                r"flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
-                r"lift\w*\s+(her|his)?\s*(top|shirt)|"
-                r"show\w*\s+(her|his)?\s*(tits|titties|boobs))\b",
-                re.IGNORECASE
-            )
-            is_flash = bool(_flash_re.search(user_input))
+            # Detect flash/titty-drop specifically (class-level compiled)
+            is_flash = bool(self._FLASH_RE.search(user_input))
 
             if is_flash:
                 undress_clause = (
@@ -992,9 +1034,8 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
                 "\n[INSTRUCTION: Always state the character's age as a specific number.]"
             )
 
-        # --- Sequence detection ---
-        _sequence_re = re.compile(r"^\s*(\d+[\.\):])\s+.+", re.MULTILINE)
-        sequence_steps = _sequence_re.findall(user_input)
+        # --- Sequence detection (class-level compiled) ---
+        sequence_steps = self._SEQUENCE_RE.findall(user_input)
         if len(sequence_steps) >= 2:
             step_count = len(sequence_steps)
             sequence_instruction = (
@@ -1004,20 +1045,8 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
         else:
             sequence_instruction = ""
 
-        # --- Person detection ---
-        _person_re = re.compile(
-            r"\b(he|she|his|her|him|they|them|their|man|men|woman|women|girl|girls|boy|boys|guy|guys|"
-            r"person|people|couple|figure|character|actress|actor|"
-            r"someone|anybody|stranger|friend|lover|wife|husband|partner|spouse|"
-            r"boyfriend|girlfriend|teenager|teenagers|adult|adults|female|male|"
-            r"blonde|brunette|redhead|nude|naked|"
-            r"singer|dancer|performer|athlete|soldier|worker|"
-            r"player|nurse|doctor|student|teacher|child|children|kid|kids|"
-            r"crowd|audience|escort|mistress|dominatrix|sub|submissive|"
-            r"friends|friend|group|gang|party|crew|team|pair|duo)\b",
-            re.IGNORECASE,
-        )
-        has_person = bool(_person_re.search(user_input + " " + scene_context))
+        # --- Person detection (class-level compiled) ---
+        has_person = bool(self._PERSON_RE.search(user_input + " " + scene_context))
         if not has_person:
             no_person_instruction = (
                 "\n[SCENE INSTRUCTION: No person described. Do NOT invent characters. "
@@ -1026,16 +1055,8 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
         else:
             no_person_instruction = ""
 
-        # --- Multi-subject detection ---
-        _multi_re = re.compile(
-            r"\b(two\s+(women|men|people|girls|guys|characters|figures)|"
-            r"both\s+(of\s+them|women|men|girls|guys)|"
-            r"(she|he)\s+and\s+(she|he|her|him)|"
-            r"(a\s+man\s+and\s+a\s+woman|a\s+woman\s+and\s+a\s+man)|"
-            r"couple|trio|they\s+(kiss|touch|embrace|undress|fuck|have))\b",
-            re.IGNORECASE,
-        )
-        has_multi_subject = bool(_multi_re.search(user_input + " " + scene_context))
+        # --- Multi-subject detection (class-level compiled) ---
+        has_multi_subject = bool(self._MULTI_RE.search(user_input + " " + scene_context))
         if has_multi_subject:
             multi_instruction = (
                 "\n[MULTI-SUBJECT: Two or more people. Track each person's position "
@@ -1064,14 +1085,8 @@ IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary,
                     "\n\n[DIALOGUE INSTRUCTION: No dialogue. Weave ambient sound as prose instead.]"
                 )
 
-        # --- Static camera detection ---
-        _static_re = re.compile(
-            r"\b(static|locked.off|locked off|fixed|stationary|no camera movement|"
-            r"camera still|still camera|camera locked|tripod shot|tripod|"
-            r"fixed camera|fixed shot|static shot|static camera)\b",
-            re.IGNORECASE,
-        )
-        if _static_re.search(user_input):
+        # --- Static camera detection (class-level compiled) ---
+        if self._STATIC_RE.search(user_input):
             camera_instruction = (
                 "\n[CAMERA: Static locked-off shot. No camera movement whatsoever. "
                 "All motion comes from the subject only.]"
@@ -1467,6 +1482,22 @@ class PersistentLatentSeed:
             noise_resized = F.interpolate(
                 noise[:1, :C], size=(H, W), mode='bilinear', align_corners=False
             )
+
+            # Mix in frequency features if available for more stable identity
+            if self._frequency_features is not None:
+                try:
+                    freq = self._frequency_features
+                    # Convert frequency features to spatial domain bias
+                    freq_spatial = torch.fft.ifft2(torch.fft.ifftshift(freq)).real
+                    freq_spatial = freq_spatial.unsqueeze(0).unsqueeze(0)  # (1,1,H_orig,W_orig)
+                    freq_resized = F.interpolate(
+                        freq_spatial, size=(H, W), mode='bilinear', align_corners=False
+                    )
+                    # Normalize and mix at 20% weight into noise
+                    freq_norm = freq_resized / (freq_resized.abs().max() + 1e-8)
+                    noise_resized = noise_resized + 0.2 * freq_norm.expand_as(noise_resized)
+                except Exception:
+                    pass  # Frequency mixing is best-effort
 
             # Build temporal noise with decay
             identity_noise = torch.zeros(B, C, T, H, W, device=noise_resized.device)
@@ -5643,6 +5674,9 @@ def generate_pro(
                 "  Fix: Run Cell 1 to clone ComfyUI_GGUF custom node."
             )
 
+        # Register UNet stage in VRAMManager for offload tracking
+        _VRAM_MGR.register_stage("UNet", 6.0 if _VRAM_MGR.is_t4 else 8.0)
+
         # ── LoRA stack: LTX2MasterLoaderLD [263] ─────────────────────────
         # [263] LTX2MasterLoaderLD in LD-I2V.json - 10-slot LoRA stacker
         # Pass None for clip_model - IC/camera LoRAs are model-only
@@ -6149,6 +6183,9 @@ def generate_pro(
         vae_for_decode = get_value_at_index(
             NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)
 
+        # Register VAE stage in VRAMManager for offload tracking
+        _VRAM_MGR.register_stage("VAE", 2.0)
+
         decoded_frames = None
         if use_tiled_vae:
             # [265] LTXVSpatioTemporalTiledVAEDecode - ComfyUI-LTXVideo
@@ -6506,7 +6543,16 @@ def generate_extended_video(
         except Exception as e:
             print(f"   ⚠️  Persistent context init failed ({e})")
             _pro_context = None
-    
+
+    # ── Cache character image tensor for identity reinforcement ───────────
+    # Load once outside the loop to avoid redundant disk reads per segment.
+    _cached_char_tensor_for_reinforce = None
+    if USE_IDENTITY_REINFORCEMENT and character_image_path and os.path.exists(str(character_image_path)):
+        try:
+            _cached_char_tensor_for_reinforce = load_image_tensor(character_image_path)
+        except Exception as e:
+            print(f"   Warning: Could not pre-load character image for reinforcement ({e})")
+
     for seg_idx in range(max_segments):
         seg_num = seg_idx + 1
         print(f"\n{'─' * 50}")
@@ -6681,25 +6727,25 @@ def generate_extended_video(
 
             # ── Identity reinforcement at segment boundary ────────────────
             # When USE_IDENTITY_REINFORCEMENT is True and a character image is
-            # provided, blend PersistentLatentSeed noise into the anchor frame
-            # tensor. This re-anchors character identity at each segment
-            # transition, preventing drift across extended generations.
+            # provided, blend character noise into the pixel-space anchor frame.
+            # NOTE: We use a direct weighted blend here (not blend_into_latent)
+            # because last_frame_tensor is in pixel space NHWC (1,H,W,3) and
+            # blend_into_latent's NHWC-to-NCHW heuristic would corrupt it.
             if USE_IDENTITY_REINFORCEMENT and character_image_path and os.path.exists(str(character_image_path)):
                 try:
-                    _char_tensor_for_reinforce = load_image_tensor(character_image_path)
-                    if _char_tensor_for_reinforce is not None:
-                        _reinforce_seed = PersistentLatentSeed(
-                            reference_image=_char_tensor_for_reinforce,
-                            seed=seed,
-                            strength=character_strength * 0.1
-                        )
-                        # Blend into anchor frame (4D tensor)
-                        if last_frame_tensor.ndim == 4:
-                            _reinforced = _reinforce_seed.blend_into_latent(last_frame_tensor)
-                            # Save the reinforced anchor
-                            _reinforced_pil = tensor_to_pil(_reinforced)
-                            _reinforced_pil.save(anchor_path, "PNG")
-                            print(f"   \u2713 Identity reinforcement applied to anchor (strength={_reinforce_seed.strength:.3f})")
+                    if _cached_char_tensor_for_reinforce is not None:
+                        _reinforce_strength = character_strength * 0.1
+                        # Direct pixel-space blend: generate seeded noise matching anchor shape
+                        _rgen = torch.Generator()
+                        _rgen.manual_seed(seed + int(abs(_cached_char_tensor_for_reinforce.mean().item()) * 1000))
+                        _pixel_noise = torch.randn_like(last_frame_tensor, generator=_rgen)
+                        # Weighted blend in pixel space (no permutation needed)
+                        _reinforced = (1.0 - _reinforce_strength) * last_frame_tensor + _reinforce_strength * _pixel_noise
+                        _reinforced = _reinforced.clamp(0.0, 1.0)
+                        # Save the reinforced anchor
+                        _reinforced_pil = tensor_to_pil(_reinforced)
+                        _reinforced_pil.save(anchor_path, "PNG")
+                        print(f"   \u2713 Identity reinforcement applied to anchor (strength={_reinforce_strength:.3f})")
                 except Exception as e:
                     print(f"   \u26a0\ufe0f  Identity reinforcement failed ({e}) - using original anchor.")
         else:
