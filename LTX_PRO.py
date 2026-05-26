@@ -196,13 +196,15 @@ dit_model = model_download(
     "/content/ComfyUI/models/unet")
 
 # ── Text encoders ─────────────────────────────────────────────────────────────
-# Gemma fp8 -- default for T4/A100 compatibility
+# Gemma fp4 -- DEFAULT for T4 (smaller footprint, ~6 GB, prevents session crash)
+# fp4_mixed uses mixed 4-bit quantization which fits comfortably on T4 (14.6 GB)
+# alongside UNet. fp8 is ~12 GB and causes OOM/session crash on T4.
 text_encoder_model = model_download(
-    f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
+    f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
     "/content/ComfyUI/models/text_encoders")
-# Gemma fp4 -- RTX 5000 Blackwell only (uncomment if on Blackwell):
+# Gemma fp8 -- use ONLY if you have >=24 GB VRAM (L4/A100/RTX 4090):
 # text_encoder_model = model_download(
-#     f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+#     f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
 #     "/content/ComfyUI/models/text_encoders")
 
 # Embeddings connector — distilled version (must match GGUF)
@@ -317,15 +319,22 @@ class VRAMManager:
             self.is_low_vram = True
 
     def get_optimal_settings(self):
-        """Return dict of optimal settings for detected GPU."""
+        """Return dict of optimal settings for detected GPU.
+        
+        CLIP precision selection:
+        - T4 (16 GB): fp4 REQUIRED. fp8 is ~12 GB which causes session crash
+          when combined with UNet (~6 GB). fp4 is ~6 GB and fits comfortably.
+        - L4 (24 GB): fp8 works fine (12 GB CLIP + 6 GB UNet = 18 GB < 24 GB).
+        - A100+ (40+ GB): fp4 preferred for speed, fp8 for quality.
+        """
         if self.is_t4:
             return {
                 "use_tiled_vae": True,
                 "use_chunk_ff": True,
                 "llm_model": "3B",
                 "max_frames": 97,
-                "clip_precision": "fp8",
-                "clip_name": "gemma_3_12B_it_fp8_scaled.safetensors",
+                "clip_precision": "fp4",
+                "clip_name": "gemma_3_12B_it_fp4_mixed.safetensors",
                 "width": 768,
                 "height": 512,
             }
@@ -4304,8 +4313,9 @@ AUTO_INCREMENT_SEED = True  # @param {type:"boolean"}
 
 # ── Model filenames ───────────────────────────────────────────────────────────
 UNET_MODEL      = "ltx-2-19b-distilled_Q4_K_M.gguf"
-# Gemma: choose ONE matching your GPU (fp4 for Blackwell, fp8 for T4/A100)
-CLIP_NAME1      = "gemma_3_12B_it_fp8_scaled.safetensors"  # fp8 for T4 (use fp4 only on Blackwell)
+# Gemma: fp4 is the safe default for T4 (~6 GB). fp8 (~12 GB) crashes T4 sessions.
+# Use fp8 only if you have >=24 GB VRAM (L4/A100/RTX 4090).
+CLIP_NAME1      = "gemma_3_12B_it_fp4_mixed.safetensors"  # fp4 for T4 (safe, ~6 GB VRAM)
 CLIP_NAME2      = "ltx-2-19b-embeddings_connector_distill_bf16.safetensors"
 VAE_VIDEO_MODEL = "LTX2_video_vae_bf16.safetensors"
 VAE_AUDIO_MODEL = "LTX2_audio_vae_bf16.safetensors"
@@ -4733,8 +4743,9 @@ def generate_pro(
     _print_vram()
 
     # Enforce sequential loading for T4
+    # fp4 CLIP needs ~6 GB, fp8 needs ~12 GB. T4 uses fp4 by default.
     if _VRAM_MGR.is_t4:
-        _VRAM_MGR.enforce_sequential_loading("CLIP", 10.0)
+        _VRAM_MGR.enforce_sequential_loading("CLIP", 6.0)
     else:
         _VRAM_MGR.enforce_sequential_loading("CLIP", 8.0)
 
@@ -4756,20 +4767,36 @@ def generate_pro(
                     type="ltxv",
                     device="default"), 0)
         except Exception as e:
-            print(f"   ⚠️  fp4 CLIP failed ({type(e).__name__}: {e})")
-            print("      Trying fp8 fallback (gemma_3_12B_it_fp8_scaled.safetensors)...")
-            fp8 = "gemma_3_12B_it_fp8_scaled.safetensors"
-            try:
-                clip_model = get_value_at_index(
-                    clip_loader.load_clip(
-                        clip_name1=fp8, clip_name2=_clip2,
-                        type="ltxv", device="default"), 0)
-                print("   ✓ fp8 CLIP loaded.")
-            except Exception as e2:
+            print(f"   ⚠️  CLIP load failed ({type(e).__name__}: {e})")
+            # Fallback logic: if fp4 was requested but failed, try fp8 and vice versa
+            _fallback_clip = None
+            if "fp4" in _clip1:
+                _fallback_clip = "gemma_3_12B_it_fp8_scaled.safetensors"
+                print("      Trying fp8 fallback...")
+            elif "fp8" in _clip1:
+                _fallback_clip = "gemma_3_12B_it_fp4_mixed.safetensors"
+                print("      Trying fp4 fallback (smaller, better for T4)...")
+            
+            if _fallback_clip:
+                try:
+                    clip_model = get_value_at_index(
+                        clip_loader.load_clip(
+                            clip_name1=_fallback_clip, clip_name2=_clip2,
+                            type="ltxv", device="default"), 0)
+                    print(f"   ✓ Fallback CLIP loaded: {_fallback_clip}")
+                except Exception as e2:
+                    raise RuntimeError(
+                        f"DualCLIPLoader failed with both encoders: {e2}\n"
+                        "  Fix: Ensure CLIP model file is downloaded (Cell 2).\n"
+                        "  For T4: use gemma_3_12B_it_fp4_mixed.safetensors\n"
+                        "  For L4/A100: use gemma_3_12B_it_fp8_scaled.safetensors"
+                    )
+            else:
                 raise RuntimeError(
-                    f"DualCLIPLoader failed: {e2}\n"
+                    f"DualCLIPLoader failed: {e}\n"
                     "  Fix: Ensure CLIP_NAME1 file is downloaded (Cell 2).\n"
-                    "  fp4 needs Blackwell GPU; use fp8 for T4/A100."
+                    "  For T4: use gemma_3_12B_it_fp4_mixed.safetensors\n"
+                    "  For L4/A100: use gemma_3_12B_it_fp8_scaled.safetensors"
                 )
 
         # ── Text Encoding (while CLIP is still in VRAM) ───────────────────
