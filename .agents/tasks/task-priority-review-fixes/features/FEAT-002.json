@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "P1 Performance fixes: (1) Load VAE once and share across all 4 usage points in generate_pro(), (2) Make audio VAE loading conditional on a new GENERATE_AUDIO config flag, (3) Keep LLM loaded across parallel prompt expansion calls in run_storyboard()",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Fix #5 (Shared VAE): After 'purge_vram(\"after unet+lora\")' at line 4783, add a shared VAE load: '_shared_vae = get_value_at_index(NODE_CLASS_MAPPINGS[\"VAELoader\"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)' with a print statement.",
     "Step 2 - Fix #5 (Replace anchor VAE): At line 4874, replace 'vae_for_anchor = get_value_at_index(NODE_CLASS_MAPPINGS[\"VAELoader\"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)' with 'vae_for_anchor = _shared_vae'. Remove the 'del vae_for_anchor' line that follows after the VAEEncode (line ~4882).",
@@ -29,5 +29,5 @@
     "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 3 sub-fixes implemented successfully. AST validation passes. Only 1 VAELoader call for VAE_VIDEO_MODEL remains in generate_pro(). Audio conditionals use _gen_audio flag. LLM keep_loaded passes through to node.generate(). The file grew by ~46 net lines due to conditional wrapping."
 }
