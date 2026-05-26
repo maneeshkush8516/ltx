@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "P1 Performance fixes: (1) Load VAE once and share across all 4 usage points in generate_pro(), (2) Make audio VAE loading conditional on a new GENERATE_AUDIO config flag, (3) Keep LLM loaded across parallel prompt expansion calls in run_storyboard()",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 - Fix #5 (Shared VAE): After 'purge_vram(\"after unet+lora\")' at line 4783, add a shared VAE load: '_shared_vae = get_value_at_index(NODE_CLASS_MAPPINGS[\"VAELoader\"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)' with a print statement.",
+    "Step 2 - Fix #5 (Replace anchor VAE): At line 4874, replace 'vae_for_anchor = get_value_at_index(NODE_CLASS_MAPPINGS[\"VAELoader\"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)' with 'vae_for_anchor = _shared_vae'. Remove the 'del vae_for_anchor' line that follows after the VAEEncode (line ~4882).",
+    "Step 3 - Fix #5 (Replace I2V VAE): At line 4926, replace 'vae_for_i2v = get_value_at_index(NODE_CLASS_MAPPINGS[\"VAELoader\"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)' with 'vae_for_i2v = _shared_vae'. Remove the 'del vae_for_i2v' and the 'aggressive_cleanup(\"VAE I2V done\")' lines after I2V conditioning.",
+    "Step 4 - Fix #5 (Replace upscale VAE): At line 5178, replace 'vae_for_up = get_value_at_index(NODE_CLASS_MAPPINGS[\"VAELoader\"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)' with 'vae_for_up = _shared_vae'. Change 'del vae_for_up, upscale_model' to just 'del upscale_model' (keep upscale_model deletion).",
+    "Step 5 - Fix #5 (Replace decode VAE): At line 5252, replace 'vae_for_decode = get_value_at_index(NODE_CLASS_MAPPINGS[\"VAELoader\"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)' with 'vae_for_decode = _shared_vae'. Remove 'del vae_for_decode' after decode (line ~5286). After Phase 8 decode + audio decode is complete (after 'del vae_audio' and 'aggressive_cleanup(\"audio VAE done\")' around line 5303), add 'del _shared_vae' followed by 'aggressive_cleanup(\"shared VAE freed\")'.",
+    "Step 6 - Fix #13 (Conditional audio): In Cell 6 config section (around line 4253 near VAE_AUDIO_MODEL), add 'GENERATE_AUDIO = True  # @param {type:\"boolean\"}' with a comment. Add a 'generate_audio: bool = None' parameter to generate_pro() function signature (after the existing feature parameters, before the closing paren). At the start of generate_pro body, resolve: '_gen_audio = generate_audio if generate_audio is not None else GENERATE_AUDIO'.",
+    "Step 7 - Fix #13 (Wrap audio VAE loading): Wrap the audio VAE loading block (lines 5020-5029, the 'vae_audio = None / try: / vae_audio = get_value_at_index(...)' block) in 'if _gen_audio:' and add 'else: vae_audio = None'.",
+    "Step 8 - Fix #13 (Wrap audio latent creation): Wrap the LTXVEmptyLatentAudio + LTXVConcatAVLatent block (lines 5031-5041) in 'if _gen_audio:' with an else branch that sets 'combined_latent = _vid_lat_input' directly (no audio concat).",
+    "Step 9 - Fix #13 (Wrap audio decode): Wrap the audio decode section (lines 5291-5298, the LTXVAudioVAEDecode block) in 'if _gen_audio:' with else: 'audio_out = None'. Also wrap 'del vae_audio' in 'if vae_audio is not None:' (it may be None now).",
+    "Step 10 - Fix #3 (Parallel prompt expansion): Add a 'keep_loaded: bool = False' parameter to the run_easy_prompt() function definition (line 2019). Pass 'keep_model_loaded=keep_loaded' instead of the hardcoded 'keep_model_loaded=False' in the node.generate() call (line ~2046).",
+    "Step 11 - Fix #3 (Storyboard loop): In the parallel expansion loop at line 6127, modify the for-loop to track the last iteration: add '_is_last = (idx == len(scenes) - 1)' and pass 'keep_loaded=not _is_last' to run_easy_prompt(). This keeps the LLM loaded for all scenes except the final one."
+  ],
+  "acceptance_criteria": [
+    "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\" passes",
+    "Only ONE instance of NODE_CLASS_MAPPINGS['VAELoader']().load_vae(vae_name=VAE_VIDEO_MODEL) remains in generate_pro() (the shared load), plus the _load_audio_vae helper call",
+    "GENERATE_AUDIO config variable exists in Cell 6",
+    "generate_pro() has a generate_audio parameter",
+    "Audio VAE and audio latent creation are wrapped in 'if _gen_audio:' conditionals",
+    "run_easy_prompt() has a keep_loaded parameter that is passed through to keep_model_loaded",
+    "Parallel expansion loop passes keep_loaded=not _is_last"
+  ],
+  "verification": [
+    "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

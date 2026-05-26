@@ -2045,7 +2045,8 @@ def _creativity_label(c: float) -> str:
 
 def run_easy_prompt(user_input: str, frame_count: int, seed: int,
                     scene_context: str = "",
-                    llm_model_override: str = None) -> Tuple[str, str]:
+                    llm_model_override: str = None,
+                    keep_loaded: bool = False) -> Tuple[str, str]:
     """
     Calls LTX2PromptArchitect (node type: LTX2PromptArchitect from LTX2EasyPrompt-LD)
     to expand a simple story description into a dense cinematic prompt.
@@ -2075,7 +2076,7 @@ def run_easy_prompt(user_input: str, frame_count: int, seed: int,
         creativity=_creativity_label(CREATIVITY),
         seed=seed,
         invent_dialogue=INVENT_DIALOGUE,
-        keep_model_loaded=False,
+        keep_model_loaded=keep_loaded,
         offline_mode=_offline,
         frame_count=frame_count,
         model=_LLM_LABEL_MAP.get(_model, "8B - NeuralDaredevil (High Quality)"),
@@ -4278,6 +4279,8 @@ CLIP_NAME1      = "gemma_3_12B_it_fp8_scaled.safetensors"  # fp8 for T4 (use fp4
 CLIP_NAME2      = "ltx-2-19b-embeddings_connector_distill_bf16.safetensors"
 VAE_VIDEO_MODEL = "LTX2_video_vae_bf16.safetensors"
 VAE_AUDIO_MODEL = "LTX2_audio_vae_bf16.safetensors"
+GENERATE_AUDIO = True  # @param {type:"boolean"}
+# Set False to skip audio generation (saves ~1 GB VRAM on T4 for text-to-video)
 UPSCALER_MODEL  = "ltx-2-spatial-upscaler-x2-1.0.safetensors"
 
 # ── Pass 1 sampling (ManualSigmas schedule — proven for GGUF distilled) ───────
@@ -4462,6 +4465,7 @@ def generate_pro(
     timeline_entries:        list  = None,   # Mutable list for accumulating timeline data
     embedding_bank:          object = None,  # CharacterEmbeddingBank instance
     velocity_latent:         object = None,  # Velocity tensor for motion injection (noise bias)
+    generate_audio:          bool  = None,   # None -> use GENERATE_AUDIO global
 ) -> Optional[str]:
     """
     LTX-2 PRO — Two-pass generation pipeline with Character Consistency.
@@ -4573,6 +4577,7 @@ def generate_pro(
     _use_multi_res = use_multi_resolution if use_multi_resolution is not None else USE_MULTI_RESOLUTION
     _export_timeline = export_timeline if export_timeline is not None else EXPORT_TIMELINE
     _persist_to_gdrive = persist_to_gdrive if persist_to_gdrive is not None else PERSIST_TO_GDRIVE
+    _gen_audio = generate_audio if generate_audio is not None else GENERATE_AUDIO
 
     # ── Apply VRAMManager optimal settings (unless user explicitly overrode) ──
     _vram_settings = _VRAM_MGR.get_optimal_settings()
@@ -4810,6 +4815,11 @@ def generate_pro(
         purge_vram("after unet+lora")
         _print_vram()
 
+        # Load shared VAE once for all phases (anchor, I2V, upscale, decode)
+        print("   Loading shared VAE...")
+        _shared_vae = get_value_at_index(
+            NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)
+
         # ══════════════════════════════════════════════════════════════════
         # PHASE 3 — CHARACTER ANCHOR (mode "anchor" or "both")
         # NOTE: anchor_latent is computed AFTER half-res dimensions are known
@@ -4898,16 +4908,13 @@ def generate_pro(
                     ), 0)
 
                 # Load VAE fresh for anchor encoding
-                vae_for_anchor = get_value_at_index(
-                    NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)
+                vae_for_anchor = _shared_vae
 
                 # [295] VAEEncode - pixels at half_w x half_h -> latent at ~(half_w/8 x half_h/8)
                 # This matches the spatial dims of EmptyLTXVLatentVideo(half_w, half_h)
                 vae_enc       = NODE_CLASS_MAPPINGS["VAEEncode"]()
                 anchor_latent = get_value_at_index(
                     vae_enc.encode(pixels=char_resized, vae=vae_for_anchor), 0)
-                del vae_for_anchor
-                aggressive_cleanup("VAE anchor done")
                 print(f"   ✓ Character anchor encoded at {half_w}×{half_h}  (mode={_char_mode})")
             except Exception as e:
                 print(f"   ⚠️  Character anchor failed ({e}) - continuing without anchor.")
@@ -4950,8 +4957,7 @@ def generate_pro(
                         image=_ref_tensor), 0)
 
                 # Load VAE fresh for I2V conditioning
-                vae_for_i2v = get_value_at_index(
-                    NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)
+                vae_for_i2v = _shared_vae
 
                 # [161] LTXVImgToVideoInplace - inject image into video latent
                 # strength = character_strength (if char mode) else image_strength
@@ -4964,8 +4970,6 @@ def generate_pro(
                     vae=vae_for_i2v,
                     image=pp_img,
                     latent=get_value_at_index(vid_lat, 0))
-                del vae_for_i2v
-                aggressive_cleanup("VAE I2V done")
                 print(f"   ✓ I2V conditioning applied  (strength={_i2v_strength}, "
                       f"LTXVImgToVideoInplace)")
             except KeyError as e:
@@ -5043,29 +5047,34 @@ def generate_pro(
                 print(f"   \u26a0\ufe0f  Anchor injection error ({e}) - using empty/I2V latent.")
                 _vid_lat_input = get_value_at_index(vid_lat, 0)
 
-        # [199] LTXVEmptyLatentAudio - audio latent
-        # Load audio VAE right before it's needed (~1GB, kept through audio decode)
-        # [196] VAELoaderKJ (or VAELoader fallback) - audio VAE
-        vae_audio = None
-        try:
-            vae_audio = get_value_at_index(_load_audio_vae(VAE_AUDIO_MODEL), 0)
-        except Exception as e:
-            raise RuntimeError(
-                f"Audio VAE load failed: {e}\n"
-                "  Fix: Check VAE_AUDIO_MODEL filename in Cell 6."
-            )
+        if _gen_audio:
+            # [199] LTXVEmptyLatentAudio - audio latent
+            # Load audio VAE right before it's needed (~1GB, kept through audio decode)
+            # [196] VAELoaderKJ (or VAELoader fallback) - audio VAE
+            vae_audio = None
+            try:
+                vae_audio = get_value_at_index(_load_audio_vae(VAE_AUDIO_MODEL), 0)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Audio VAE load failed: {e}\n"
+                    "  Fix: Check VAE_AUDIO_MODEL filename in Cell 6."
+                )
 
-        elalat  = NODE_CLASS_MAPPINGS["LTXVEmptyLatentAudio"]()
-        aud_lat = elalat.EXECUTE_NORMALIZED(
-            frames_number=frames, frame_rate=fps, batch_size=1,
-            audio_vae=vae_audio)
+            elalat  = NODE_CLASS_MAPPINGS["LTXVEmptyLatentAudio"]()
+            aud_lat = elalat.EXECUTE_NORMALIZED(
+                frames_number=frames, frame_rate=fps, batch_size=1,
+                audio_vae=vae_audio)
 
-        # [109] LTXVConcatAVLatent — combine video + audio latents
-        catav           = NODE_CLASS_MAPPINGS["LTXVConcatAVLatent"]()
-        av_lat1         = catav.EXECUTE_NORMALIZED(
-            video_latent=_vid_lat_input,
-            audio_latent=get_value_at_index(aud_lat, 0))
-        combined_latent = get_value_at_index(av_lat1, 0)
+            # [109] LTXVConcatAVLatent - combine video + audio latents
+            catav           = NODE_CLASS_MAPPINGS["LTXVConcatAVLatent"]()
+            av_lat1         = catav.EXECUTE_NORMALIZED(
+                video_latent=_vid_lat_input,
+                audio_latent=get_value_at_index(aud_lat, 0))
+            combined_latent = get_value_at_index(av_lat1, 0)
+        else:
+            # No audio - use video latent directly
+            vae_audio = None
+            combined_latent = _vid_lat_input
 
         # ══════════════════════════════════════════════════════════════════
         # PHASE 5 — SIGMA SCHEDULE
@@ -5202,8 +5211,7 @@ def generate_pro(
 
         # [LTXVLatentUpsampler] [118] - 2x spatial upsample
         # Load VAE and upscale model fresh for upsampling
-        vae_for_up = get_value_at_index(
-            NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)
+        vae_for_up = _shared_vae
 
         # [189] LatentUpscaleModelLoader in LD-I2V.json
         try:
@@ -5231,7 +5239,7 @@ def generate_pro(
             samples=get_value_at_index(cropped, 2),
             upscale_model=upscale_model,
             vae=vae_for_up)
-        del vae_for_up, upscale_model
+        del upscale_model
         aggressive_cleanup("VAE upscale done")
 
         # [LTXVConcatAVLatent] [117] — upsampled video + audio
@@ -5276,8 +5284,7 @@ def generate_pro(
 
         # ── Video decode ───────────────────────────────────────────────────
         # Load VAE fresh for decode
-        vae_for_decode = get_value_at_index(
-            NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)
+        vae_for_decode = _shared_vae
 
         decoded_frames = None
         if use_tiled_vae:
@@ -5310,22 +5317,26 @@ def generate_pro(
                 vaedecode.decode(samples=vid_lat_fin, vae=vae_for_decode), 0)
             print("   ✓ Standard VAE decode (VAEDecode)")
 
-        del vae_for_decode
-        aggressive_cleanup("VAE decode done")
-
         # ── Audio decode [201] ─────────────────────────────────────────────
-        # [201] LTXVAudioVAEDecode - decode audio latent
-        try:
-            aud_dec   = NODE_CLASS_MAPPINGS["LTXVAudioVAEDecode"]()
-            audio_out = aud_dec.EXECUTE_NORMALIZED(
-                samples=aud_lat_fin,
-                audio_vae=vae_audio)
-        except Exception as e:
-            print(f"   ⚠️  Audio decode failed ({e}) - proceeding without audio.")
+        if _gen_audio and vae_audio is not None:
+            # [201] LTXVAudioVAEDecode - decode audio latent
+            try:
+                aud_dec   = NODE_CLASS_MAPPINGS["LTXVAudioVAEDecode"]()
+                audio_out = aud_dec.EXECUTE_NORMALIZED(
+                    samples=aud_lat_fin,
+                    audio_vae=vae_audio)
+            except Exception as e:
+                print(f"   ⚠️  Audio decode failed ({e}) - proceeding without audio.")
+                audio_out = None
+        else:
             audio_out = None
 
-        del vae_audio
+        if vae_audio is not None:
+            del vae_audio
         aggressive_cleanup("audio VAE done")
+
+        del _shared_vae
+        aggressive_cleanup("shared VAE freed")
 
         # ── POST-PROCESSING: Color matching & grading (FEAT-003) ──────────
         if decoded_frames is not None:
@@ -6153,6 +6164,7 @@ def run_storyboard(
         print("   📝 Parallel prompt expansion (loading LLM once for all scenes)...")
         try:
             for idx, scene in enumerate(scenes):
+                _is_last = (idx == len(scenes) - 1)
                 _inp = scene.get("user_input", "")
                 if _inp.strip():
                     _pos, _neg = run_easy_prompt(
@@ -6160,6 +6172,7 @@ def run_storyboard(
                         frame_count=scene.get("frames", FRAMES),
                         seed=scene.get("seed", SEED),
                         scene_context=scene.get("character_description", ""),
+                        keep_loaded=not _is_last,
                     )
                     expanded_prompts[idx] = (_pos, _neg)
             print(f"   ✓ Expanded {len(expanded_prompts)} prompts in batch")
