@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Strengthen Character Consistency System: Upgrade PersistentLatentSeed with multi-frame temporal anchoring, add OVERLAP_FRAMES_CHARACTER integration into generate_pro() and generate_extended_video(), implement CharacterFeatureExtractor for detailed profile extraction (facial features, body type, hair, age, skin tone, clothing), and add dual-anchor identity persistence across story scenes.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In /projects/sandbox/ltx/LTX_PRO.py, replace the existing PersistentLatentSeed class (around line 1030-1120) with an enhanced version that: (a) supports multi-frame reference (accepts multiple reference images), (b) adds temporal decay with configurable OVERLAP_FRAMES_CHARACTER window, (c) computes frequency-domain features from reference for more stable identity preservation, (d) adds a get_identity_noise() method that returns noise shaped for video latents with per-frame decay weighting.",
     "Add a new CharacterFeatureExtractor class after CharacterPromptAnchor (around line 1180). This class takes a character image and extracts a structured profile dict with keys: ethnicity_skin_tone, age_estimate, hair_color_style, body_type, clothing_description, distinguishing_features, facial_features. Use the InlineVisionDescribe model to generate this, with a specialized CHARACTER_EXTRACT_PROMPT that outputs structured key:value pairs.",
@@ -25,5 +25,5 @@
     "Run: python -m py_compile /projects/sandbox/ltx/LTX_PRO.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "InlineVisionDescribe has no model_name param in __init__; it takes model_key in describe(). CharacterFeatureExtractor updated to match actual API. load_image_tensor() exists at line ~1898 and works for 4D tensors. The _char_mode variable in generate_pro() is computed from character_mode.lower().strip()."
 }
