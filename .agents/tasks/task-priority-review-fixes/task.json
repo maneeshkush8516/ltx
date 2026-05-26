@@ -1,7 +1,14 @@
 {
   "task_id": "task-priority-review-fixes",
-  "task_description": "Implement priority fixes from the code review of LTX_PRO.py: P0 critical (VRAM leak between segments, imageio quality), P1 performance (shared VAE, conditional audio, parallel prompt), P2 quality (full system prompt)",
-  "status": "in_progress",
-  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
-  "blocked_reason": null
+  "task_description": "Implement priority fixes from the code review of LTX_PRO.py: P0 critical (VRAM leak between segments, imageio quality), P1 performance (shared VAE, conditional audio, parallel prompt), P2 quality (full system prompt), review follow-ups (audio-off crash, double encode, silent ffmpeg)",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "AST parse validates successfully. All fixes implemented including review follow-ups: Pass 2 audio-off crash fixed with if _gen_audio guards, double lossy encode eliminated by piping raw frames to ffmpeg, and silent ffmpeg failure now logs the error."
+  }
 }

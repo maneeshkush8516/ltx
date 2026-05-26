@@ -1913,27 +1913,38 @@ def _load_audio_vae(vae_name: str):
 def save_frames_as_mp4(frames_np, output_path: str, fps: int = 25, crf: int = 19) -> str:
     """Save numpy frames array as h264 MP4 using ffmpeg with proper quality settings.
     
-    Replaces direct imageio.mimsave(codec='libx264') calls which produce low quality output.
-    Uses ffmpeg with crf=19, yuv420p, and medium preset to match VHS_VideoCombine quality.
+    Pipes raw frames directly to ffmpeg to avoid double lossy encoding.
+    Uses crf=19, yuv420p, and medium preset to match VHS_VideoCombine quality.
     """
-    import imageio
-    _temp = output_path + ".raw.mp4"
-    imageio.mimsave(_temp, [f for f in frames_np], fps=fps)
+    import numpy as np
+    frames_list = list(frames_np)
+    if not frames_list:
+        raise ValueError("save_frames_as_mp4: empty frames array")
+    h, w = frames_list[0].shape[:2]
     try:
-        subprocess.run([
-            "ffmpeg", "-y", "-i", _temp,
+        proc = subprocess.Popen([
+            "ffmpeg", "-y",
+            "-f", "rawvideo", "-pix_fmt", "rgb24",
+            "-s", f"{w}x{h}", "-r", str(fps),
+            "-i", "pipe:0",
             "-c:v", "libx264", "-crf", str(crf),
             "-pix_fmt", "yuv420p", "-preset", "medium",
             "-movflags", "+faststart",
             output_path
-        ], check=True, capture_output=True)
-        os.remove(_temp)
-    except Exception:
-        # Fallback: just rename the raw file
-        if os.path.exists(_temp):
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            os.rename(_temp, output_path)
+        ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for frame in frames_list:
+            frame_bytes = np.ascontiguousarray(frame).astype(np.uint8).tobytes()
+            proc.stdin.write(frame_bytes)
+        proc.stdin.close()
+        proc.wait()
+        if proc.returncode != 0:
+            stderr_out = proc.stderr.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"ffmpeg exited with code {proc.returncode}: {stderr_out}")
+    except Exception as e:
+        print(f"[save_frames_as_mp4] ffmpeg pipe failed: {e}")
+        # Fallback: use imageio without explicit codec (single encode, not double)
+        import imageio
+        imageio.mimsave(output_path, frames_list, fps=fps)
     return output_path
 
 
@@ -5208,10 +5219,14 @@ def generate_pro(
         _print_vram()
 
         # [LTXVSeparateAVLatent] — split P1 AV → video + audio
-        ltxvsep    = NODE_CLASS_MAPPINGS["LTXVSeparateAVLatent"]()
-        s1         = ltxvsep.EXECUTE_NORMALIZED(av_latent=p1_av)
-        vid_lat_p1 = get_value_at_index(s1, 0)
-        aud_lat_p1 = get_value_at_index(s1, 1)
+        if _gen_audio:
+            ltxvsep    = NODE_CLASS_MAPPINGS["LTXVSeparateAVLatent"]()
+            s1         = ltxvsep.EXECUTE_NORMALIZED(av_latent=p1_av)
+            vid_lat_p1 = get_value_at_index(s1, 0)
+            aud_lat_p1 = get_value_at_index(s1, 1)
+        else:
+            vid_lat_p1 = p1_av
+            aud_lat_p1 = None
 
         # [LTXVCropGuides] — trim conditioning to match upscaled latent dims
         ltxvcrop = NODE_CLASS_MAPPINGS["LTXVCropGuides"]()
@@ -5262,9 +5277,13 @@ def generate_pro(
         aggressive_cleanup("VAE upscale done")
 
         # [LTXVConcatAVLatent] [117] — upsampled video + audio
-        av_lat2 = catav.EXECUTE_NORMALIZED(
-            video_latent=get_value_at_index(upsampled, 0),
-            audio_latent=aud_lat_p1)
+        if _gen_audio:
+            av_lat2 = catav.EXECUTE_NORMALIZED(
+                video_latent=get_value_at_index(upsampled, 0),
+                audio_latent=aud_lat_p1)
+            pass2_latent_image = get_value_at_index(av_lat2, 0)
+        else:
+            pass2_latent_image = get_value_at_index(upsampled, 0)
 
         noise_p2 = randomnoise.EXECUTE_NORMALIZED(noise_seed=pass2_seed)
 
@@ -5274,7 +5293,7 @@ def generate_pro(
                 guider=get_value_at_index(guider_p2, 0),
                 sampler=get_value_at_index(sampler_p2, 0),
                 sigmas=sig_p2_low,
-                latent_image=get_value_at_index(av_lat2, 0))
+                latent_image=pass2_latent_image)
             p2_denoised = get_value_at_index(out2, 1)  # denoised_output slot
         except Exception as e:
             if vae_audio is not None:
@@ -5297,9 +5316,14 @@ def generate_pro(
         _print_vram()
 
         # [LTXVSeparateAVLatent] [125] — final split
-        s2          = ltxvsep.EXECUTE_NORMALIZED(av_latent=p2_denoised)
-        vid_lat_fin = get_value_at_index(s2, 0)
-        aud_lat_fin = get_value_at_index(s2, 1)
+        if _gen_audio:
+            ltxvsep     = NODE_CLASS_MAPPINGS["LTXVSeparateAVLatent"]()
+            s2          = ltxvsep.EXECUTE_NORMALIZED(av_latent=p2_denoised)
+            vid_lat_fin = get_value_at_index(s2, 0)
+            aud_lat_fin = get_value_at_index(s2, 1)
+        else:
+            vid_lat_fin = p2_denoised
+            aud_lat_fin = None
 
         # ── Video decode ───────────────────────────────────────────────────
         # Load VAE fresh for decode

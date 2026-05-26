@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-004",
+  "type": "fix",
+  "description": "Address review findings: (1) Audio-off crash in Pass 2 from unguarded LTXVSeparateAVLatent/catav usage, (2) Double lossy encode in save_frames_as_mp4, (3) Silent ffmpeg failure swallowing errors",
+  "status": "completed",
+  "steps": [
+    "Step 1: Wrap Pass 2 LTXVSeparateAVLatent (line ~5210) in 'if _gen_audio:' guard. When audio is off, set vid_lat_p1=p1_av and aud_lat_p1=None.",
+    "Step 2: Wrap LTXVConcatAVLatent usage (catav, line ~5265) in 'if _gen_audio:' guard. When audio is off, pass upsampled video directly as pass2_latent_image.",
+    "Step 3: Update Pass 2 sampling to use pass2_latent_image instead of get_value_at_index(av_lat2, 0).",
+    "Step 4: Wrap final LTXVSeparateAVLatent (Phase 8 decode, line ~5299) in 'if _gen_audio:' guard. When audio is off, vid_lat_fin=p2_denoised and aud_lat_fin=None.",
+    "Step 5: Replace save_frames_as_mp4 implementation - pipe raw frames directly to ffmpeg via stdin (-f rawvideo -pix_fmt rgb24) instead of writing intermediate via imageio.mimsave (which caused double lossy encode).",
+    "Step 6: Add error logging in the except block (print the exception) so ffmpeg failures are diagnosable, then fall back to single-encode imageio.mimsave."
+  ],
+  "acceptance_criteria": [
+    "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\" passes",
+    "Pass 2 LTXVSeparateAVLatent and catav usage are wrapped in 'if _gen_audio:' conditionals",
+    "When _gen_audio=False, video latent flows directly without AV split/concat",
+    "save_frames_as_mp4 pipes raw frames to ffmpeg via subprocess.Popen stdin (no intermediate file)",
+    "ffmpeg failures are logged with the exception message before falling back"
+  ],
+  "verification": [
+    "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\""
+  ],
+  "blocked_reason": null,
+  "findings": "All 3 review issues fixed. Pass 2 AV operations now properly guarded with if _gen_audio conditionals. save_frames_as_mp4 now uses subprocess.Popen to pipe raw RGB frames directly to ffmpeg, eliminating double lossy encoding. Exception logging added in fallback path."
+}
