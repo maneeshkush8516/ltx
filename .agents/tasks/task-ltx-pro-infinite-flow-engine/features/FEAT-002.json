@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Integrate full EasyPrompt tier detection logic from LTX2EasyPromptLD.py into InlinePromptArchitect, tighten T4 VRAM optimization with strict sequential loading, integrate OVERLAP_FRAMES properly into generate_infinite_flow(), enhance story-to-prompt workflow with character extraction, and add audio sync foundation hooks.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In /projects/sandbox/ltx/LTX_PRO.py, replace the InlinePromptArchitect.generate() method's simplified tier detection (around line 710-760) with the FULL content-tier detection logic from LTX2EasyPromptLD.py (lines 542-830). This includes: (a) the full _explicit_re, _sensual_re, _undress_re, _already_naked_re, _clothing_re, _mid_action_re patterns; (b) undressing segment enforcement for tier 2 and tier 3; (c) flash/titty-drop detection in tier 2; (d) sequence detection for numbered steps; (e) person detection and no_person_instruction; (f) multi-subject detection and multi_instruction; (g) dialogue instruction variants (invent, user-provided, or none); (h) static camera detection. Also port the full SYSTEM_PROMPT from LTX2EasyPromptLD.py (line 157-216) replacing the simplified version in InlinePromptArchitect.",
     "Upgrade the VRAMManager.enforce_sequential_loading() method (around line 345) to add explicit model stage tracking. Add a _loaded_stages dict attribute that tracks what is currently in VRAM. Add methods: register_stage(name, estimated_gb), release_stage(name). In generate_pro(), wrap each model loading phase with register/release calls so the manager knows exactly what is loaded. Add a new method suggest_offload_order() that returns stages to unload based on priority (LLM first, then Vision, then CLIP, UNet last).",
@@ -29,5 +29,5 @@
     "Run: python -m py_compile /projects/sandbox/ltx/LTX_PRO.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 7 steps implemented successfully. Full tier detection from LTX2EasyPromptLD.py ported including _explicit_re, _sensual_re, _undress_re, _already_naked_re, _clothing_re, _mid_action_re patterns plus sequence/person/multi-subject/dialogue/static-camera detection. VRAMManager enhanced with _loaded_stages dict, register_stage(), release_stage(), suggest_offload_order(). _verify_vram_clear() helper added and called between Vision unload and CLIP load in generate_pro(). Overlap frame accounting already correct in generate_extended_video() - added explicit comment and expected-total printout. extract_character_profiles_from_script() added and integrated into decompose_script_to_scenes(). AudioSyncEngine expanded with get_segment_timing(), sync_lip_keyframes_to_latent() stub, inject_audio_conditioning() stub, and VOICE_SYNC_HOOKS comment section. COLAB INSTALLATION INSTRUCTIONS section added at file end. py_compile and AST parse both pass cleanly."
 }
