@@ -196,10 +196,6 @@ dit_model = model_download(
     "/content/ComfyUI/models/unet")
 
 # ── Text encoders ─────────────────────────────────────────────────────────────
-# Gemma fp8 -- default for T4/A100 compatibility
-#text_encoder_model = model_download(
-#    f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
-#    "/content/ComfyUI/models/text_encoders")
 # Gemma fp4 -- RTX 5000 Blackwell only (uncomment if on Blackwell):
 text_encoder_model = model_download(
      f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
@@ -6018,7 +6014,7 @@ SCENES = [
     {
         "user_input"    : "a woman enters a dimly lit café, shaking rain from her coat, looks around",
         "image_path"    : CHARACTER_IMAGE_PATH,   # use character image as first-frame seed
-        "frames"        : 97,
+        "frames"        : 121,
         "seed"          : SEED,
         "output_prefix" : f"Story01-{CHARACTER_NAME}",
         "character_image_path": CHARACTER_IMAGE_PATH,
@@ -6037,7 +6033,7 @@ SCENES = [
     {
         "user_input"    : "she notices something outside and leans forward, face half lit by neon glow",
         "image_path"    : None,   # filled by continuity from scene 2
-        "frames"        : 97,
+        "frames"        : 121,
         "seed"          : SEED + 2,
         "output_prefix" : f"Story03-{CHARACTER_NAME}",
         "character_image_path": CHARACTER_IMAGE_PATH,
