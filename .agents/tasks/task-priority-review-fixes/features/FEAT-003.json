@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "P2 Quality fix: Replace InlinePromptArchitect.SYSTEM_PROMPT with the full detailed version from LTX2EasyPromptLD.py (the canonical source)",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1: Read the full SYSTEM_PROMPT from LTX2EasyPromptLD.py (lines 164-201). It is a triple-quoted string starting with 'You are a cinematic prompt writer for LTX-2...' and ending with '...Begin immediately with the video style or shot description.'",
     "Step 2: In LTX_PRO.py, replace the InlinePromptArchitect.SYSTEM_PROMPT (lines 452-474) - which is currently a parenthesized string concatenation - with the full triple-quoted version from LTX2EasyPromptLD.py. The full version includes: PRIORITY ORDER with detailed character description rules, UNDRESSING RULE, camera movement as prose rules, audio/dialogue prose rules, WRITING RULES, and IMPORTANT output rules. Keep the class attribute assignment format: 'SYSTEM_PROMPT = \"\"\"...(full content)...\"\"\"'"
@@ -17,5 +17,5 @@
     "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Replaced simplified parenthesized SYSTEM_PROMPT with full triple-quoted version from LTX2EasyPromptLD.py. Used double-backslash escapes for apostrophes in dialogue examples inside triple-quoted string. AST parse and all acceptance criteria verified."
 }
