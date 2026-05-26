@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix CUDA OOM on T4 by implementing aggressive VRAM cleanup after LLM/Vision model unloading and adding VRAM verification checkpoints. The root cause is that device_map='auto' from accelerate creates dispatch hooks that survive .to('cpu') + del, leaving ~13GB of VRAM still allocated after the LLM is supposedly unloaded. The fix must address three files: LTX2EasyPromptLD.py, LTX2VisionEasyPromptLD.py, and LTX_PRO.py.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1: Fix LTX2EasyPromptLD.py unload_model() (line 288). The current approach does model.to('cpu') then del model, but device_map='auto' from accelerate attaches dispatch hooks holding CUDA references. The fix: (a) Before .to('cpu'), call accelerate.hooks.remove_hook_from_module(model, recurse=True) if available. (b) Iterate all model parameters and buffers and move them to CPU explicitly: for p in model.parameters(): p.data = p.data.cpu(); if p.grad: p.grad = p.grad.cpu(). (c) Delete model._hf_hook if it exists. (d) After del model/tokenizer, call gc.collect() THREE times (needed for cyclic refs), then torch.cuda.synchronize(), torch.cuda.empty_cache(), torch.cuda.ipc_collect(). (e) Add a verification print of torch.cuda.memory_allocated() after cleanup to confirm <500MB used.",
     "Step 2: Fix LTX2VisionEasyPromptLD.py unload section (line 207-221). Same device_map='auto' problem as the prompt node. Apply the same accelerate hook removal + explicit parameter CPU move + triple gc + verification pattern. The _INSTANCE['model'] global dict pattern needs special handling: set _INSTANCE['model'] = None AFTER all cleanup steps.",
@@ -39,5 +39,5 @@
     "grep -c 'gc.collect()' /projects/sandbox/ltx/LTX_PRO.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes implemented successfully. Used python3 instead of python for AST validation (pyenv setup required explicit version). All 3 files pass AST parse. gc.collect() count in LTX_PRO.py is 25 (high due to triple-gc pattern in multiple locations). The force_unload_all_models function is placed at module level after aggressive_cleanup and before _print_vram, allowing VRAMManager.enforce_sequential_loading to call it by name."
 }
