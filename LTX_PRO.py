@@ -1,19 +1,44 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
-# ║  LTX-2 PRO — Complete Pipeline v1.0                                        ║
-# ║  Integrates: LD-I2V + SVI-Pro + EasyPrompt + Character Consistency          ║
+# ║  LTX-2 Infinite Flow Engine v2.0                                            ║
+# ║  Integrates: LD-I2V + SVI-Pro + EasyPrompt + VisionDescribe + Character     ║
 # ║  Base engine: LTX-2 19B Distilled GGUF Q4_K_M (Colab T4/L4/A100 safe)     ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
+"""
+LTX-2 Infinite Flow Engine v2.0 - Unified AI Video Generation Pipeline.
+
+Integrates prompt expansion (InlinePromptArchitect), vision description
+(InlineVisionDescribe), character consistency (PersistentLatentSeed,
+CharacterPromptAnchor), T4 VRAM optimization (VRAMManager), voice sync
+foundations (AudioSyncEngine), and infinite-length video generation
+(generate_infinite_flow with FlowState).
+
+GENERATION MODES:
+    1. Single Clip    - generate_pro() for one video clip
+    2. Storyboard     - run_storyboard() for multi-scene sequential generation
+    3. Infinite Flow  - generate_infinite_flow() for SVI-Pro style extension
+
+GPU REQUIREMENTS:
+    T4  (16 GB): 768x512, 97 frames, 3B LLM, fp8 CLIP, tiled VAE
+    L4  (24 GB): 1024x576, 161 frames, 8B LLM
+    A100 (40 GB): 1280x720, 241 frames, 14B LLM
+"""
 #
 # CELL ORDER:
-#   Cell 1 — Environment setup & custom nodes   (run once per session)
-#   Cell 2 — Model downloads                    (run once, skip if cached)
-#   Cell 3 — Imports, helpers & character system (run every session)
-#   Cell 4 — Easy Prompt + Vision settings      (edit to taste)
-#   Cell 5 — Character Consistency & LoRA config (edit per character)
-#   Cell 6 — Video generation configuration     (edit per video)
-#   Cell 7 — Define generate_pro()              (run once per session)
-#   Cell 8 — Storyboard / multi-scene runner    (optional)
-#   Cell 9 — Run                                (re-run for each clip)
+#   Cell 0  - Header + architecture docstring
+#   Cell 1  - Environment setup (with VRAM detection)
+#   Cell 2  - Model downloads
+#   Cell 3  - Imports, helpers, VRAMManager, InlinePromptArchitect,
+#             InlineVisionDescribe, character system
+#   Cell 4  - Easy Prompt + Vision settings
+#   Cell 4.5 - Script-to-Shot Decomposer
+#   Cell 5  - Character Consistency & LoRA config
+#   Cell 6  - Video generation configuration
+#   Cell 7  - Define generate_pro() + generate_infinite_flow()
+#   Cell 8  - Storyboard / multi-scene runner
+#   Cell 9  - Run
+#   Cell 9.5 - Merge clips
+#   Cell 10 - Export & Post-Processing
+#   Cell 11 - Usage Instructions
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -29,55 +54,63 @@
 # @markdown - **ComfyUI-LTXVideo** (tiled VAE decode + AV helpers)
 
 # ── Base Python packages ──────────────────────────────────────────────────────
-!pip install torch torchvision torchaudio
+# -- Colab shell commands (uncomment in Google Colab) --
+# These lines use Colab/Jupyter shell (!) and magic (%) syntax.
+# They are commented out for static analysis / AST validity but MUST be
+# uncommented when running in a fresh Google Colab session.
+# !pip install torch torchvision torchaudio
 
-%cd /content
+# %cd /content
 from IPython.display import clear_output
 clear_output()
 
-!pip install -q torchsde einops diffusers accelerate nest_asyncio
-!pip install -q av spandrel albumentations onnx opencv-python onnxruntime
-!pip install -q imageio imageio-ffmpeg
+# -- Colab shell commands (uncomment in Google Colab) --
+# !pip install -q torchsde einops diffusers accelerate nest_asyncio
+# !pip install -q av spandrel albumentations onnx opencv-python onnxruntime
+# !pip install -q imageio imageio-ffmpeg
 
 # Extra packages required by EasyPrompt & VisionDescribe nodes
-!pip install -q transformers>=4.43.0 accelerate qwen-vl-utils huggingface_hub
+# !pip install -q transformers>=4.43.0 accelerate qwen-vl-utils huggingface_hub
 
-# ── ComfyUI (pinned branch — matches reference notebook) ─────────────────────
-!git clone --branch ComfyUI_22_01_2026_v0.10.0 https://github.com/Isi-dev/ComfyUI.git
-!pip install -r /content/ComfyUI/requirements.txt -q
+# ── ComfyUI (pinned branch -- matches reference notebook) ────────────────────
+# -- Colab shell commands (uncomment in Google Colab) --
+# !git clone --branch ComfyUI_22_01_2026_v0.10.0 https://github.com/Isi-dev/ComfyUI.git
+# !pip install -r /content/ComfyUI/requirements.txt -q
 clear_output()
 
 # ── Custom nodes ──────────────────────────────────────────────────────────────
-%cd /content/ComfyUI/custom_nodes
+# -- Colab shell commands (uncomment in Google Colab) --
+# %cd /content/ComfyUI/custom_nodes
 
 # Core KJNodes (pinned build — ImageResizeKJv2, PathchSageAttentionKJ, etc.)
-!git clone --branch kj_1.2.6               https://github.com/Isi-dev/ComfyUI_KJNodes
+# !git clone --branch kj_1.2.6               https://github.com/Isi-dev/ComfyUI_KJNodes
 # GGUF loader (UnetLoaderGGUF)
-!git clone --branch ComfyUI_GGUF_22_01_2026 https://github.com/Isi-dev/ComfyUI_GGUF.git
+# !git clone --branch ComfyUI_GGUF_22_01_2026 https://github.com/Isi-dev/ComfyUI_GGUF.git
 # LTXVideo nodes (LTXVImgToVideoInplace, LTXVPreprocess, tiled VAE, etc.)
-!git clone https://github.com/Lightricks/ComfyUI-LTXVideo.git
+# !git clone https://github.com/Lightricks/ComfyUI-LTXVideo.git
 # LTX2EasyPrompt-LD — LTX2PromptArchitect + LTX2VisionDescribe
-!git clone https://github.com/seanhan19911990-source/LTX2EasyPrompt-LD.git
+# !git clone https://github.com/seanhan19911990-source/LTX2EasyPrompt-LD.git
 # LTX2-Master-Loader — LTX2MasterLoaderLD (10-slot LoRA stacker)
-!git clone https://github.com/seanhan19911990-source/LTX2-Master-Loader.git
+# !git clone https://github.com/seanhan19911990-source/LTX2-Master-Loader.git
 # VideoHelperSuite — VHS_VideoCombine (h264-mp4, crf=19, yuv420p)
-!git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git
+# !git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git
 
 # ── Install node requirements ─────────────────────────────────────────────────
-%cd /content/ComfyUI/custom_nodes/ComfyUI_KJNodes
-!pip install -r requirements.txt -q
+# -- Colab shell commands (uncomment in Google Colab) --
+# %cd /content/ComfyUI/custom_nodes/ComfyUI_KJNodes
+# !pip install -r requirements.txt -q
 
-%cd /content/ComfyUI/custom_nodes/ComfyUI_GGUF
-!pip install -r requirements.txt -q
+# %cd /content/ComfyUI/custom_nodes/ComfyUI_GGUF
+# !pip install -r requirements.txt -q
 
-%cd /content/ComfyUI/custom_nodes/ComfyUI-LTXVideo
-!pip install -r requirements.txt -q 2>/dev/null || true
+# %cd /content/ComfyUI/custom_nodes/ComfyUI-LTXVideo
+# !pip install -r requirements.txt -q 2>/dev/null || true
 
-%cd /content/ComfyUI/custom_nodes/LTX2EasyPrompt-LD
-!pip install -r requirements.txt -q 2>/dev/null || true
+# %cd /content/ComfyUI/custom_nodes/LTX2EasyPrompt-LD
+# !pip install -r requirements.txt -q 2>/dev/null || true
 
-%cd /content/ComfyUI/custom_nodes/LTX2-Master-Loader
-!pip install -r requirements.txt -q 2>/dev/null || true
+# %cd /content/ComfyUI/custom_nodes/LTX2-Master-Loader
+# !pip install -r requirements.txt -q 2>/dev/null || true
 
 # ── System tools ──────────────────────────────────────────────────────────────
 import subprocess
@@ -94,9 +127,9 @@ print("Installing apt packages...")
 install_apt_packages()
 
 # ── Final setup ───────────────────────────────────────────────────────────────
-%cd /content/ComfyUI
+# %cd /content/ComfyUI
 import os, sys
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,garbage_collection_threshold:0.6"
 sys.path.insert(0, "/content/ComfyUI")
 
 clear_output()
@@ -163,14 +196,10 @@ dit_model = model_download(
     "/content/ComfyUI/models/unet")
 
 # ── Text encoders ─────────────────────────────────────────────────────────────
-# Gemma fp4 — RTX 5000 Blackwell. Use fp8 for T4/A100 (uncomment below).
+# Gemma fp4 -- RTX 5000 Blackwell only (uncomment if on Blackwell):
 text_encoder_model = model_download(
-    f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
-    "/content/ComfyUI/models/text_encoders")
-# Gemma fp8 — T4 / A100 / RTX 3000-4000 (uncomment if fp4 OOMs):
-# text_encoder_model = model_download(
-#     f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
-#     "/content/ComfyUI/models/text_encoders")
+     f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+     "/content/ComfyUI/models/text_encoders")
 
 # Embeddings connector — distilled version (must match GGUF)
 text_encoder2_model = model_download(
@@ -196,6 +225,7 @@ upscaler_model = model_download(
     f"{LIGHTRIX}/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors",
     "/content/ComfyUI/models/latent_upscale_models")
 
+
 # ── IC LoRAs + Camera Control LoRAs ──────────────────────────────────────────
 # All used by LTX2MasterLoaderLD node [263] in LD-I2V.json
 LORA_URLS = {
@@ -205,11 +235,11 @@ LORA_URLS = {
     "Pose":        f"{LIGHTRIX}/LTX-2-19b-IC-LoRA-Pose-Control/resolve/main/ltx-2-19b-ic-lora-pose-control.safetensors",
     "Dolly-In":    f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-In/resolve/main/ltx-2-19b-lora-camera-control-dolly-in.safetensors",
     "Dolly-Left":  f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Left/resolve/main/ltx-2-19b-lora-camera-control-dolly-left.safetensors",
-    "Dolly-Out":   f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Out/resolve/main/ltx-2-19b-lora-camera-control-dolly-out.safetensors",
-    "Dolly-Right": f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Right/resolve/main/ltx-2-19b-lora-camera-control-dolly-right.safetensors",
-    "Jib-Down":    f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Jib-Down/resolve/main/ltx-2-19b-lora-camera-control-jib-down.safetensors",
-    "Jib-Up":      f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Jib-Up/resolve/main/ltx-2-19b-lora-camera-control-jib-up.safetensors",
-    "Static":      f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Static/resolve/main/ltx-2-19b-lora-camera-control-static.safetensors",
+    #"Dolly-Out":   f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Out/resolve/main/ltx-2-19b-lora-camera-control-dolly-out.safetensors",
+    #"Dolly-Right": f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Right/resolve/main/ltx-2-19b-lora-camera-control-dolly-right.safetensors",
+    #"Jib-Down":    f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Jib-Down/resolve/main/ltx-2-19b-lora-camera-control-jib-down.safetensors",
+    #"Jib-Up":      f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Jib-Up/resolve/main/ltx-2-19b-lora-camera-control-jib-up.safetensors",
+    #"Static":      f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Static/resolve/main/ltx-2-19b-lora-camera-control-static.safetensors",
 }
 
 LORA_DIR = "/content/ComfyUI/models/loras"
@@ -220,7 +250,6 @@ for name, url in LORA_URLS.items():
     print(f"   {'✅' if r else '❌'}  {name}")
 
 print("\n✅ All model files downloaded.")
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CELL 3  ─  IMPORTS, HELPERS & CHARACTER CONSISTENCY SYSTEM
@@ -243,8 +272,1124 @@ from IPython.display import display, HTML, Image as IPImage, clear_output
 from google.colab import files
 
 warnings.filterwarnings("ignore")
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# NOTE: PYTORCH_CUDA_ALLOC_CONF already set in Cell 1 with garbage_collection_threshold
 sys.path.insert(0, "/content/ComfyUI")
+
+import re
+import functools
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VRAM MANAGER - Auto-detects GPU and selects optimal strategies
+# ══════════════════════════════════════════════════════════════════════════════
+
+class VRAMManager:
+    """
+    Auto-detects GPU type and selects optimal generation strategies.
+
+    For T4 (< 16GB): forces tiled VAE, chunk FF, 3B model, frame cap 97, fp8 CLIP.
+    For L4 (< 24GB): standard settings with optional tiled VAE.
+    For A100+ (>= 24GB): full quality, no restrictions.
+    """
+
+    def __init__(self):
+        self.total_vram_gb = 0.0
+        self.gpu_name = "unknown"
+        self.is_t4 = False
+        self.is_low_vram = False
+        self._detect_gpu()
+
+    def _detect_gpu(self):
+        """Detect GPU and set flags."""
+        if torch.cuda.is_available():
+            self.gpu_name = torch.cuda.get_device_name(0)
+            self.total_vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            self.is_t4 = self.total_vram_gb < 16
+            self.is_low_vram = self.total_vram_gb < 24
+        else:
+            self.total_vram_gb = 0.0
+            self.gpu_name = "CPU"
+            self.is_t4 = True
+            self.is_low_vram = True
+
+    def get_optimal_settings(self):
+        """Return dict of optimal settings for detected GPU."""
+        if self.is_t4:
+            return {
+                "use_tiled_vae": True,
+                "use_chunk_ff": True,
+                "llm_model": "3B",
+                "max_frames": 97,
+                "clip_precision": "fp4",
+                "clip_name": "gemma_3_12B_it_fp4_mixed.safetensors",
+                "width": 768,
+                "height": 512,
+            }
+        elif self.is_low_vram:
+            return {
+                "use_tiled_vae": False,
+                "use_chunk_ff": False,
+                "llm_model": "8B",
+                "max_frames": 161,
+                "clip_precision": "fp4",
+                "clip_name": "ggemma_3_12B_it_fp4_mixed.safetensors",
+                "width": 1024,
+                "height": 576,
+            }
+        else:
+            return {
+                "use_tiled_vae": False,
+                "use_chunk_ff": False,
+                "llm_model": "14B",
+                "max_frames": 241,
+                "clip_precision": "fp4",
+                "clip_name": "gemma_3_12B_it_fp4_mixed.safetensors",
+                "width": 1280,
+                "height": 720,
+            }
+
+    def get_available_vram(self):
+        """Return currently available VRAM in GB (driver-level free memory)."""
+        if not torch.cuda.is_available():
+            return 0.0
+        free_bytes, _ = torch.cuda.mem_get_info()
+        return free_bytes / 1024**3
+
+    def can_fit(self, estimated_gb):
+        """Check if an operation requiring estimated_gb will fit."""
+        available = self.get_available_vram()
+        return available >= estimated_gb * 1.1  # 10% safety margin
+
+    def print_status(self):
+        """Print current VRAM status."""
+        if not torch.cuda.is_available():
+            print("   No GPU available")
+            return
+        used = torch.cuda.memory_allocated() / 1024**3
+        pct = used / self.total_vram_gb * 100
+        print(f"   VRAM: {used:.1f}/{self.total_vram_gb:.1f} GB ({pct:.0f}%) [{self.gpu_name}]")
+
+    def enforce_sequential_loading(self, stage: str, required_gb: float) -> None:
+        """Ensure enough VRAM is free for the next stage. Force-unload if needed."""
+        if not torch.cuda.is_available():
+            return
+        available = self.get_available_vram()
+        if available >= required_gb:
+            return
+
+        print(f"   [{stage}] Need {required_gb:.1f} GB, only {available:.1f} GB free. Force-unloading...")
+        force_unload_all_models()
+        aggressive_cleanup(f"{stage} pre-load")
+
+        available = self.get_available_vram()
+        if available < required_gb:
+            # Second attempt
+            time.sleep(0.5)
+            gc.collect()
+            gc.collect()
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+            available = self.get_available_vram()
+
+        if available < required_gb:
+            raise RuntimeError(
+                f"[{stage}] Cannot free enough VRAM. Need {required_gb:.1f} GB, "
+                f"only {available:.1f} GB available after force cleanup. "
+                f"Total VRAM: {self.total_vram_gb:.1f} GB [{self.gpu_name}].\n"
+                f"  Fix: Ensure previous models are fully unloaded before loading {stage}."
+            )
+        print(f"   [{stage}] OK: {available:.1f} GB free (need {required_gb:.1f} GB)")
+
+
+def vram_guard(func):
+    """Decorator that catches OOM errors, clears cache, and retries once."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except torch.cuda.OutOfMemoryError:
+            print(f"   [vram_guard] OOM in {func.__name__}, clearing cache and retrying...")
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+            gc.collect()
+            return func(*args, **kwargs)
+    return wrapper
+
+
+# Global VRAMManager instance
+_VRAM_MGR = VRAMManager()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INLINE PROMPT ARCHITECT - Embedded LLM prompt expansion (fallback mode)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class InlinePromptArchitect:
+    """
+    Embedded prompt expansion logic from LTX2EasyPromptLD.py.
+    Used as fallback when the ComfyUI LTX2PromptArchitect node is not available.
+
+    Loads LLM models (NeuralDaredevil 8B, Llama 3.2 3B, Qwen3 14B) with
+    proper VRAM management (load -> generate -> unload pattern).
+    """
+
+    MODELS = {
+        "8B": "mlabonne/NeuralDaredevil-8B-abliterated",
+        "3B": "huihui-ai/Llama-3.2-3B-Instruct-abliterated",
+        "14B": "huihui-ai/Huihui-Qwen3-14B-abliterated-v2",
+    }
+
+    SYSTEM_PROMPT = (
+        "You are a cinematic prompt writer for LTX-2, an AI video generation model. "
+        "Your job is to expand a user's rough idea into a rich, detailed, video-ready prompt.\n\n"
+        "PRIORITY ORDER:\n"
+        "1. Video style & genre\n"
+        "2. Camera angle & shot type\n"
+        "3. Character description (age MUST be a specific number)\n"
+        "4. Scene & environment\n"
+        "5. Action & motion in present tense\n"
+        "6. Camera movement as prose (no bracketed directions)\n"
+        "7. Audio woven naturally into prose (max 2 sounds active)\n\n"
+        "WRITING RULES:\n"
+        "- Use present tense throughout\n"
+        "- Be explicit and cinematic with dense, specific visual language\n"
+        "- Fill the full available length\n"
+        "- Aim for 8-12 sentences of dense, flowing prose\n"
+        "- Output ONLY the expanded prompt, no preamble or commentary\n"
+        "- Do NOT include notes, checklists, or meta-commentary"
+    )
+
+    _PREAMBLE_RE = re.compile(
+        r"^(Sure!?|Certainly!?|Absolutely!?|Of course!?|Here(?:'s| is).*?:|Great!?)[^\n]*\n?",
+        re.IGNORECASE,
+    )
+    _ROLE_BLEED_RE = re.compile(
+        r"\s*(assistant|user|system|<\|[^|>]*\|>)\s*$",
+        re.IGNORECASE,
+    )
+
+    def __init__(self):
+        self.tokenizer = None
+        self.model = None
+        self.loaded_model_key = None
+
+    def _load_model(self, model_key, offline_mode=False, local_path=""):
+        """Load the specified LLM model."""
+        if self.model is not None and self.loaded_model_key == model_key:
+            return
+        if self.model is not None:
+            self._unload_model()
+
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        hf_id = self.MODELS.get(model_key, self.MODELS["8B"])
+        source = local_path.strip() if local_path and local_path.strip() else hf_id
+
+        if not offline_mode and not (local_path and local_path.strip()):
+            try:
+                from huggingface_hub import snapshot_download
+                source = snapshot_download(hf_id)
+            except Exception:
+                source = hf_id
+
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        self.tokenizer = AutoTokenizer.from_pretrained(source, local_files_only=offline_mode)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            source, device_map="auto", torch_dtype=dtype,
+            trust_remote_code=True, local_files_only=offline_mode)
+        self.model.eval()
+        self.loaded_model_key = model_key
+
+    def _unload_model(self):
+        """Unload model and free VRAM."""
+        if self.model is not None:
+            _deep_unload_model(self.model, label="InlinePromptArchitect")
+            del self.model
+            del self.tokenizer
+        self.model = None
+        self.tokenizer = None
+        self.loaded_model_key = None
+
+    @staticmethod
+    def _clean_output(text):
+        """Strip LLM preamble, role-token bleed, and compliance checklists."""
+        text = text.strip()
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        text = InlinePromptArchitect._PREAMBLE_RE.sub("", text)
+        text = InlinePromptArchitect._ROLE_BLEED_RE.sub("", text)
+        text = re.sub(r"\.(assistant|user|system|<\|[^|>]*\|>)\s*\n", ".\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*\n+Note:.*$", "", text, flags=re.DOTALL).strip()
+
+        # Strip everything AFTER the AMBIENT tag if one still appears
+        ambient_match = re.search(r"\[AMBIENT:[^\]]*\]", text, flags=re.IGNORECASE)
+        if ambient_match:
+            text = text[:ambient_match.end()].strip()
+
+        # Strip trailing (Lora: ...) tags the model echoes from the LoRA instruction
+        text = re.sub(r"\s*\(Lora:[^)]*\)\s*$", "", text, flags=re.IGNORECASE).strip()
+
+        # Strip trailing (Note: ...) blocks and everything after
+        text = re.sub(r"\s*\(Note:.*$", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+        # Strip instruction labels that leaked into output
+        text = re.sub(
+            r"^(Action Beat \d+:|Undressing Segment:|Flash/Reveal Segment:|Titty Drop[^:]*:|Note:|Scene Instruction:|Pacing:|Dialogue Instruction:).*",
+            "",
+            text,
+            flags=re.IGNORECASE | re.MULTILINE,
+        ).strip()
+
+        # Strip orphaned closing bracket spam: ) ) ) ) ) ...
+        text = re.sub(r"[\s)]{3,}$", "", text).strip()
+
+        # Catch the fake conversation / self-eval patterns
+        text = re.sub(
+            r"\s*\n+\d+\s+tokens[\s,].*$",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+        text = re.sub(
+            r"\s*\n+(Please let me know|Let me revise|No further revision|Confirmed\.|"
+            r"Written to meet|The scene is now over|The output ends|The task is|The task was|"
+            r"The goal was|Nothing more|No continuation|No additional|The response does not|"
+            r"It does not continue|It ceases when|Any such statement|"
+            r"Output length:|Action count:|Total time:|Last character:|I avoided|I wrote|"
+            r"I adhered|I hope this|Thank you for your|Please confirm|I submitted|"
+            r"I can revise|feel free to instruct).*$",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+
+        # Strip model loop/panic patterns
+        text = re.sub(
+            r"\s*(Ended\.\s*\d+\s*actions|"
+            r"\d+\s+actions[\.,]\s*\d+\s+tokens|"
+            r"\d+\s+tokens[\.,]\s*Done|"
+            r"Done\.\s+\d+\s+seconds|"
+            r"Finished\.\s+\d+|"
+            r"The end\.\s+\d+\s+seconds|"
+            r"Fading to black\.\s+The end|"
+            r"The model stops|The output ends here|The scene ends here|"
+            r"It\'s complete now|All done\.|Stop now\.|"
+            r"End of prompt|End of output|No more to add|Nothing to revise|"
+            r"The work is (?:done|finished|complete)|The prompt is (?:done|finished|complete)|"
+            r"No further writing|No more writing|Stop\.\s+Finish|Finished\.\s+Complete|"
+            r"The scene is complete|The scene is over|Complete\.\s+Finished|"
+            r"Done\.\s+No more|BorderSide:).*$",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+
+        # Strip filler character spam (repeated single characters)
+        text = re.sub(r"(\s*\b(\w)\b\s*){10,}", " ", text).strip()
+
+        # Strip token+action count combos
+        text = re.sub(r"\s*\(\d+\s+tokens?[^)]*\)", "", text, flags=re.IGNORECASE).strip()
+
+        # Strip compliance checklist spam - 2+ consecutive parens after last sentence
+        text = re.sub(r"\s*(\([^)]{5,120}\)\s*){2,}$", "", text, flags=re.DOTALL).strip()
+
+        # Strip single trailing compliance paren with known instruction keywords
+        text = re.sub(
+            r"\s*\([^)]{0,200}(no setup|no resolution|action count|actions adhered|"
+            r"token count|pacing|dialogue integrated|character age|inline prose|"
+            r"no padding|no extraneous|exactly \d+ action|hard stop|BorderSide)[^)]{0,200}\)\s*$",
+            "",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
+
+        # Strip leaked pacing instruction echoes
+        text = re.sub(r"\(Exact timing:.*?\)", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+        # Strip token/word count lines
+        text = re.sub(r"\s*\n*(token|word)\s+count\s*:\s*\d+.*$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+
+        # Strip leaked internal pacing/time tags
+        text = re.sub(r"\[TIME LIMIT[^\]]*\]", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"\[PACING[^\]]*\]", "", text, flags=re.IGNORECASE).strip()
+
+        # Strip leaked timestamp annotations
+        text = re.sub(r"\s*\(\d+\s+seconds?\)\s*$", "", text).strip()
+        text = re.sub(r"\s*\(\d+:\d+\s*[-\u2013]\s*\d+:\d+\)\s*", " ", text).strip()
+
+        # Strip inline action-time annotations
+        text = re.sub(r"\(The action takes up roughly[^\)]*\)", " ", text, flags=re.IGNORECASE).strip()
+
+        # Strip screenplay-style bracketed camera directions
+        text = re.sub(r"\((?:DOWN|UP|PULL|PUSH|ZOOM|HOLD|FADE|PAN|TILT|TRUCK|DOLLY|AMBIENT)[^\)]{0,80}\)", "", text, flags=re.IGNORECASE).strip()
+
+        # Convert [AMBIENT: ...] tags to clean prose
+        text = re.sub(r"\[AMBIENT:\s*([^\]]*)\]", r"\1", text, flags=re.IGNORECASE).strip()
+
+        # Clean up any double blank lines left by removals
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text
+
+    @staticmethod
+    def _build_negative_prompt(result, user_input):
+        """Build a scene-aware negative prompt without a second LLM call."""
+        _NEG_BASE = (
+            "blurry, out of focus, low quality, worst quality, jpeg artifacts, "
+            "static, no motion, frozen, duplicate, watermark, text, signature, "
+            "poorly drawn, bad anatomy, deformed, disfigured, extra limbs, "
+            "missing limbs, floating limbs, disconnected body parts, "
+            "overexposed, underexposed, grainy, noise"
+        )
+        combined = (result + " " + user_input).lower()
+        extras = []
+        if any(w in combined for w in ["indoor", "room", "interior", "bedroom"]):
+            extras.append("harsh outdoor lighting, direct sunlight")
+        elif any(w in combined for w in ["outdoor", "street", "beach", "forest"]):
+            extras.append("studio background, indoor lighting")
+        if any(w in combined for w in ["night", "dark", "moonlight", "dimly lit"]):
+            extras.append("overexposed, bright daylight, blown highlights")
+        elif any(w in combined for w in ["daylight", "sunny", "golden hour"]):
+            extras.append("underexposed, dark shadows, black crush")
+        if any(w in combined for w in ["close-up", "portrait", "face shot"]):
+            extras.append("wide angle distortion, fish eye, full body shot")
+        # Explicit content negatives
+        if any(w in combined for w in ["pussy", "cock", "penis", "vagina", "nude", "naked", "explicit", "nipple", "breast"]):
+            extras.append("censored, mosaic, pixelated, black bar, blurred genitals")
+        # Wide shot negatives
+        if any(w in combined for w in ["wide shot", "wide angle", "aerial", "bird's-eye", "establishing"]):
+            extras.append("close-up, portrait crop, tight frame")
+        # Multi-character negatives
+        if any(w in combined for w in ["two women", "two men", "two people", "both", "together", "couple", "they "]):
+            extras.append("merged bodies, fused figures, incorrect number of people")
+        parts = [_NEG_BASE] + extras
+        return ", ".join(parts)
+
+    def _build_stop_token_ids(self):
+        """Build stop token IDs for generation."""
+        delimiter_strings = [
+            "assistant", "user", "system", "<|eot_id|>",
+            "<|end_of_turn|>", "<|im_end|>", "<end_of_turn>",
+            "[/INST]", "### Human", "### Assistant",
+        ]
+        stop_ids = [self.tokenizer.eos_token_id]
+        for s in delimiter_strings:
+            ids = self.tokenizer.encode(s, add_special_tokens=False)
+            if ids:
+                stop_ids.append(ids[0])
+        seen = set()
+        unique = []
+        for tid in stop_ids:
+            if tid is not None and tid not in seen:
+                seen.add(tid)
+                unique.append(tid)
+        return unique
+
+    def generate(self, user_input, frame_count=192, seed=-1, creativity=0.9,
+                 model_key="8B", scene_context="", lora_triggers="",
+                 offline_mode=False, local_path="", keep_loaded=False):
+        """
+        Generate an expanded cinematic prompt from user input.
+
+        Args:
+            user_input: Simple scene description
+            frame_count: Number of frames (controls pacing)
+            seed: Random seed (-1 for random)
+            creativity: Temperature (0.7, 0.9, or 1.1)
+            model_key: "8B", "3B", or "14B"
+            scene_context: Optional vision description context
+            lora_triggers: LoRA trigger words to prepend
+            offline_mode: Use cached models only
+            local_path: Path to local model snapshot
+            keep_loaded: Keep model in VRAM after generation
+
+        Returns:
+            Tuple of (expanded_prompt, negative_prompt)
+        """
+        self._load_model(model_key, offline_mode, local_path)
+
+        real_seconds = frame_count / 24.0
+        action_count = max(1, min(10, round(real_seconds / 4)))
+
+        pacing_hint = (
+            f"This clip is {real_seconds:.0f} seconds long. "
+            f"Write EXACTLY {action_count} distinct actions."
+        )
+
+        if seed != -1:
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+
+        token_val = max(256, min(1200, action_count * 120))
+        max_tokens_actual = int(token_val * 1.05)
+        min_tokens = int(token_val * 0.75)
+
+        effective_input = user_input.strip()
+        if scene_context and scene_context.strip():
+            effective_input = (
+                f"[SCENE CONTEXT FROM IMAGE]\n{scene_context.strip()}\n\n"
+                f"[USER DIRECTION]\n{user_input.strip()}"
+            )
+
+        lora_instruction = ""
+        if lora_triggers and lora_triggers.strip():
+            lora_instruction = (
+                f"\n[LORA INSTRUCTION: Begin output with: {lora_triggers.strip()}]"
+            )
+
+        # ── Content-tier detection ────────────────────────────────────────
+        # Tier 3: explicit anatomical/act terms
+        _explicit_re = re.compile(
+            r"\b(pussy|cock|dick|penis|vagina|clit|clitoris|anus|asshole|"
+            r"tits|cum|jizz|squirt\w*|creampie|orgasm|fuck|fucking|"
+            r"blowjob|handjob|bj|hj|breed\w*|bareback|raw\s+dog|"
+            r"balls|ballsack|taint|penetrat\w*|thrust\w*)\b",
+            re.IGNORECASE,
+        )
+        # Tier 2: nudity/sensuality implied
+        _sensual_re = re.compile(
+            r"\b(naked|nude|topless|undress\w*|strip\w*|takes?\s+off|"
+            r"sensual|erotic|intimate|lingerie|bare\s+skin|bare\s+body|"
+            r"braless|pantyless|commando|see.through|sheer|"
+            r"titty\s+drop|titties|flash\w*\s+(her|his)?\s*(tits|boobs|breasts)|"
+            r"bath\w*|shower\w*|bikini|thong|g.string)\b",
+            re.IGNORECASE,
+        )
+
+        is_explicit = bool(_explicit_re.search(user_input))
+        is_sensual = bool(_sensual_re.search(user_input)) and not is_explicit
+
+        # Build tier-specific instruction
+        if is_explicit:
+            tier_instruction = (
+                "\n[INSTRUCTION: This is an explicit adult scene. "
+                "Use direct anatomical terms exactly as the user wrote them. "
+                "Do not replace with euphemisms. Describe body parts, positions, "
+                "and physical actions with blunt, specific language. "
+                "Always state character age as a specific number.]"
+            )
+        elif is_sensual:
+            tier_instruction = (
+                "\n[INSTRUCTION: This scene involves nudity or sensual content. "
+                "Describing the bare body naturally is appropriate. "
+                "However, do NOT introduce sexual acts the user did not ask for. "
+                "Keep the tone sensual and cinematic, not pornographic. "
+                "Always state character age as a specific number.]"
+            )
+        else:
+            tier_instruction = (
+                "\n[INSTRUCTION: Always state the character's age as a specific number.]"
+            )
+
+        # ── Pacing enforcement ────────────────────────────────────────────
+        pacing_instruction = (
+            f"\n[PACING: {pacing_hint} "
+            f"Write approximately {token_val} tokens total. "
+            f"Do not exceed the action count. "
+            f"Do NOT write token count, word count, or any parenthetical summary at the end.]"
+        )
+
+        messages = [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "user", "content": effective_input + tier_instruction +
+             lora_instruction + pacing_instruction},
+        ]
+
+        is_qwen3 = "Qwen3" in (model_key or "")
+        raw = self.tokenizer.apply_chat_template(
+            messages, return_tensors="pt", add_generation_prompt=True,
+            enable_thinking=False if is_qwen3 else None)
+
+        if hasattr(raw, "input_ids"):
+            input_ids = raw.input_ids.to(self.model.device)
+        elif isinstance(raw, dict):
+            input_ids = raw["input_ids"].to(self.model.device)
+        elif isinstance(raw, list):
+            input_ids = torch.tensor([raw], dtype=torch.long).to(self.model.device)
+        else:
+            input_ids = raw.to(self.model.device)
+
+        input_length = input_ids.shape[1]
+        stop_ids = self._build_stop_token_ids()
+
+        with torch.no_grad():
+            output_ids = self.model.generate(
+                input_ids,
+                min_new_tokens=min_tokens,
+                max_new_tokens=max_tokens_actual,
+                temperature=creativity,
+                do_sample=True,
+                top_k=40,
+                top_p=0.9,
+                repetition_penalty=1.07,
+                pad_token_id=self.tokenizer.eos_token_id,
+                eos_token_id=stop_ids,
+            )
+
+        generated_tokens = output_ids[0][input_length:]
+        result = self.tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+        del output_ids, input_ids
+
+        result = self._clean_output(result)
+        neg_prompt = self._build_negative_prompt(result, user_input)
+
+        if not keep_loaded:
+            self._unload_model()
+
+        return (result, neg_prompt)
+
+
+# Global inline prompt architect instance (lazy-loaded)
+_INLINE_PROMPT_ARCHITECT = None
+
+def _get_inline_prompt_architect():
+    global _INLINE_PROMPT_ARCHITECT
+    if _INLINE_PROMPT_ARCHITECT is None:
+        _INLINE_PROMPT_ARCHITECT = InlinePromptArchitect()
+    return _INLINE_PROMPT_ARCHITECT
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INLINE VISION DESCRIBER - Embedded vision model image description
+# ══════════════════════════════════════════════════════════════════════════════
+
+class InlineVisionDescribe:
+    """
+    Embedded vision description logic from LTX2VisionEasyPromptLD.py.
+    Used as fallback when the ComfyUI LTX2VisionDescribe node is not available.
+
+    Loads Qwen2.5-VL models for image-to-text description with proper
+    VRAM management (load -> describe -> unload pattern).
+    """
+
+    DESCRIBE_PROMPT = (
+        "Describe this image in one paragraph of plain sentences, around 100-130 words. "
+        "Start with 'Style: photorealistic' or 'Style: anime' or 'Style: 3D animation' etc. "
+        "Then describe the person -- your FIRST sentence about the person MUST explicitly state "
+        "their ethnicity and skin tone using plain terms. "
+        "Then continue with their age, hair colour and style, body type, "
+        "what they are wearing or doing, and any exposed body parts. "
+        "Describe their pose, what they are on or interacting with, "
+        "the camera framing and angle, the lighting and time of day, and the setting. "
+        "Write it as one flowing paragraph. Do not use bullet points, lists, or labels. "
+        "If there is no person in the image, describe the scene instead."
+    )
+
+    MODEL_OPTIONS = {
+        "3B-fast": "huihui-ai/Qwen2.5-VL-3B-Instruct-abliterated",
+        "7B-nsfw": "prithivMLmods/Qwen2.5-VL-7B-Abliterated-Caption-it",
+    }
+
+    def __init__(self):
+        self.processor = None
+        self.model = None
+        self.source = None
+
+    def _load_model(self, model_key="3B-fast", offline_mode=False, local_path=""):
+        """Load vision model."""
+        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+
+        hf_id = self.MODEL_OPTIONS.get(model_key, self.MODEL_OPTIONS["3B-fast"])
+        source = local_path.strip() if local_path and local_path.strip() else hf_id
+
+        if not offline_mode and not (local_path and local_path.strip()):
+            try:
+                from huggingface_hub import snapshot_download
+                source = snapshot_download(hf_id)
+            except Exception:
+                source = hf_id
+
+        if self.model is not None and self.source == source:
+            return
+
+        self._unload()
+
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        self.processor = AutoProcessor.from_pretrained(source, local_files_only=offline_mode)
+        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            source, device_map="auto", torch_dtype=dtype, local_files_only=offline_mode)
+        self.model.eval()
+        self.source = source
+
+    def _unload(self):
+        """Unload model and free VRAM."""
+        if self.model is not None:
+            _deep_unload_model(self.model, label="InlineVisionDescribe")
+        self.model = None
+        self.processor = None
+        self.source = None
+
+    def describe(self, image_tensor, model_key="3B-fast", offline_mode=False, local_path=""):
+        """
+        Describe an image tensor and return a text description.
+
+        Args:
+            image_tensor: ComfyUI NHWC tensor or PIL Image
+            model_key: "3B-fast" or "7B-nsfw"
+            offline_mode: Use cached models only
+            local_path: Path to local model snapshot
+
+        Returns:
+            String description of the image
+        """
+        self._load_model(model_key, offline_mode, local_path)
+
+        # Convert tensor to PIL
+        if isinstance(image_tensor, torch.Tensor):
+            if image_tensor.ndim == 4:
+                image_tensor = image_tensor[0]
+            arr = (image_tensor.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+            pil_image = Image.fromarray(arr, "RGB")
+        else:
+            pil_image = image_tensor
+
+        try:
+            from qwen_vl_utils import process_vision_info
+        except ImportError:
+            self._unload()
+            return ""
+
+        messages = [
+            {"role": "system", "content": "You are an image description tool for an AI video pipeline."},
+            {"role": "user", "content": [
+                {"type": "image", "image": pil_image},
+                {"type": "text", "text": self.DESCRIBE_PROMPT},
+            ]},
+        ]
+
+        text_input = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True)
+        image_inputs, video_inputs = process_vision_info(messages)
+
+        inputs = self.processor(
+            text=[text_input], images=image_inputs, videos=video_inputs,
+            padding=True, return_tensors="pt").to(self.model.device)
+
+        input_len = inputs["input_ids"].shape[1]
+        tok = self.processor.tokenizer
+        stop_ids = []
+        if tok.eos_token_id is not None:
+            stop_ids.append(tok.eos_token_id)
+        for s in ["<|im_end|>", "<|endoftext|>"]:
+            ids = tok.encode(s, add_special_tokens=False)
+            if len(ids) == 1 and ids[0] not in stop_ids:
+                stop_ids.append(ids[0])
+
+        pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
+
+        with torch.no_grad():
+            out = self.model.generate(
+                **inputs, max_new_tokens=180, temperature=0.3,
+                do_sample=True, top_p=0.9, pad_token_id=pad_id,
+                eos_token_id=stop_ids)
+
+        new_tokens = out[0][input_len:]
+        description = tok.decode(new_tokens, skip_special_tokens=True).strip()
+        del out, inputs
+
+        self._unload()
+        return description
+
+
+# Global inline vision describer instance (lazy-loaded)
+_INLINE_VISION_DESCRIBER = None
+
+def _get_inline_vision_describer():
+    global _INLINE_VISION_DESCRIBER
+    if _INLINE_VISION_DESCRIBER is None:
+        _INLINE_VISION_DESCRIBER = InlineVisionDescribe()
+    return _INLINE_VISION_DESCRIBER
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHARACTER CONSISTENCY - PersistentLatentSeed + CharacterPromptAnchor
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PersistentLatentSeed:
+    """
+    Maintains a fixed noise tensor derived from the character reference image.
+
+    This noise is blended into the initial latent of every scene at
+    LATENT_SEED_STRENGTH to anchor the model's generation toward
+    the character's features.
+    """
+
+    def __init__(self, reference_image=None, seed=42, strength=0.15):
+        """
+        Args:
+            reference_image: Character reference tensor (1, H, W, C) or PIL Image
+            seed: Fixed seed for reproducible noise generation
+            strength: Blend strength (0.0 = no effect, 1.0 = full replacement)
+        """
+        self.seed = seed
+        self.strength = strength
+        self._noise_tensor = None
+        self._reference_hash = None
+
+        if reference_image is not None:
+            self.set_reference(reference_image)
+
+    def set_reference(self, reference_image):
+        """Generate fixed noise from a reference image."""
+        if isinstance(reference_image, torch.Tensor):
+            if reference_image.ndim == 4:
+                reference_image = reference_image[0]
+            img_data = reference_image.cpu()
+        else:
+            # Non-Tensor input cannot produce a usable noise tensor for blending
+            self._noise_tensor = None
+            return
+
+        # Create a hash from the image to detect changes
+        new_hash = hash(img_data.sum().item())
+        if new_hash == self._reference_hash:
+            return
+
+        self._reference_hash = new_hash
+
+        # Generate fixed noise seeded from the reference image content
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + int(abs(img_data.mean().item()) * 1000))
+        self._noise_tensor = torch.randn_like(img_data, generator=generator)
+
+    def get_noise(self, target_shape=None):
+        """Get the persistent noise tensor, optionally resized to target shape."""
+        if self._noise_tensor is None:
+            return None
+        if target_shape is None:
+            return self._noise_tensor * self.strength
+        # Resize noise to match target
+        noise = self._noise_tensor.unsqueeze(0) if self._noise_tensor.ndim == 3 else self._noise_tensor
+        if noise.shape != target_shape:
+            import torch.nn.functional as F
+            noise = F.interpolate(
+                noise.permute(0, 3, 1, 2) if noise.ndim == 4 and noise.shape[-1] <= 4 else noise,
+                size=target_shape[-2:] if len(target_shape) >= 2 else None,
+                mode='bilinear', align_corners=False
+            )
+            if noise.ndim == 4 and noise.shape[1] <= 4:
+                noise = noise.permute(0, 2, 3, 1)
+        return noise * self.strength
+
+    def blend_into_latent(self, latent_tensor, num_frames=None):
+        """Blend persistent noise into the first N frames of a video latent.
+
+        Mixes the persistent character noise into the latent tensor at
+        self.strength weight for the specified num_frames (defaults to all).
+        """
+        if self._noise_tensor is None:
+            return latent_tensor
+
+        import torch.nn.functional as F
+        noise = self._noise_tensor
+
+        # Determine how many frames to blend into
+        if latent_tensor.ndim == 5:
+            # Video latent: (B, C, T, H, W) or (B, T, C, H, W)
+            total_t = latent_tensor.shape[2]
+            blend_frames = min(num_frames, total_t) if num_frames is not None else total_t
+
+            # Resize noise to match spatial dims of the latent
+            target_h, target_w = latent_tensor.shape[3], latent_tensor.shape[4]
+            if noise.ndim == 3:
+                noise = noise.unsqueeze(0)  # Add batch dim
+            # Ensure noise has right channel count
+            if noise.ndim == 4 and noise.shape[-1] <= 4:
+                noise = noise.permute(0, 3, 1, 2)  # NHWC -> NCHW
+            noise_resized = F.interpolate(
+                noise[:1, :latent_tensor.shape[1]],
+                size=(target_h, target_w),
+                mode='bilinear', align_corners=False
+            )
+            # Apply blend to the first N frames with strength weighting
+            blended = latent_tensor.clone()
+            for t in range(blend_frames):
+                # Temporal decay: stronger blend at the start, fading toward num_frames
+                temporal_weight = self.strength * (1.0 - t / max(blend_frames, 1))
+                blended[:, :, t] = (
+                    (1.0 - temporal_weight) * blended[:, :, t]
+                    + temporal_weight * noise_resized
+                )
+            return blended
+
+        elif latent_tensor.ndim == 4:
+            # Single image latent: (B, C, H, W)
+            target_h, target_w = latent_tensor.shape[2], latent_tensor.shape[3]
+            if noise.ndim == 3:
+                noise = noise.unsqueeze(0)
+            if noise.ndim == 4 and noise.shape[-1] <= 4:
+                noise = noise.permute(0, 3, 1, 2)
+            noise_resized = F.interpolate(
+                noise[:1, :latent_tensor.shape[1]],
+                size=(target_h, target_w),
+                mode='bilinear', align_corners=False
+            )
+            blended = (1.0 - self.strength) * latent_tensor + self.strength * noise_resized
+            return blended
+
+        # Fallback for unexpected dims
+        return latent_tensor
+
+
+class CharacterPromptAnchor:
+    """
+    Prepends a detailed character description prefix to EVERY prompt automatically.
+
+    Format: '[Character: {name}. {description}. Maintain exact appearance throughout.] {actual_prompt}'
+    """
+
+    def __init__(self, name="", description="", enabled=True):
+        """
+        Args:
+            name: Character name
+            description: Detailed character description
+            enabled: Whether to inject prefix
+        """
+        self.name = name
+        self.description = description
+        self.enabled = enabled
+
+    def anchor_prompt(self, prompt):
+        """Prepend character anchor to a prompt string."""
+        if not self.enabled or not self.description:
+            return prompt
+        prefix = f"[Character: {self.name}. {self.description}. Maintain exact appearance throughout.] "
+        return prefix + prompt
+
+    def set_character(self, name, description):
+        """Update character identity."""
+        self.name = name
+        self.description = description
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUDIO SYNC ENGINE - Voice sync foundations (placeholder)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Voice sync configuration
+VOICE_SYNC_ENABLED = False  # @param {type:"boolean"}
+VOICE_AUDIO_PATH = ""  # @param {type:"string"}
+VOICE_TRANSCRIPT = ""  # @param {type:"string"}
+LIP_SYNC_STRENGTH = 0.5  # @param {type:"number"}
+
+
+class AudioSyncEngine:
+    """
+    Audio synchronization engine for voice sync and beat-aligned generation.
+
+    Provides placeholder methods for:
+    - Audio loading and beat detection
+    - Lip sync keyframe generation
+    - Segment alignment to audio beats
+    - TTS voice generation
+    - Audio-reactive camera movement
+    """
+
+    def __init__(self):
+        self.audio_data = None
+        self.beat_map = None
+        self.sample_rate = None
+        self.duration = 0.0
+
+    def load_audio(self, path):
+        """
+        Load an audio file for analysis.
+
+        Args:
+            path: Path to audio file (mp3, wav, etc.)
+
+        Returns:
+            True if loaded successfully, False otherwise
+        """
+        if not path or not os.path.exists(path):
+            return False
+        try:
+            import librosa
+            self.audio_data, self.sample_rate = librosa.load(path, sr=None)
+            self.duration = len(self.audio_data) / self.sample_rate
+            return True
+        except ImportError:
+            print("   [AudioSync] librosa not available - audio sync disabled")
+            return False
+        except Exception as e:
+            print(f"   [AudioSync] Load failed: {e}")
+            return False
+
+    def extract_beat_map(self):
+        """
+        Extract beat timestamps from loaded audio.
+
+        Returns:
+            List of beat timestamps in seconds, or empty list
+        """
+        if self.audio_data is None:
+            return []
+        try:
+            import librosa
+            tempo, beat_frames = librosa.beat.beat_track(y=self.audio_data, sr=self.sample_rate)
+            self.beat_map = librosa.frames_to_time(beat_frames, sr=self.sample_rate).tolist()
+            return self.beat_map
+        except Exception:
+            return []
+
+    def generate_lip_sync_keyframes(self, transcript):
+        """
+        Generate lip sync keyframes from a transcript.
+
+        Args:
+            transcript: Text transcript of speech
+
+        Returns:
+            List of dicts with timing and mouth shape info (placeholder)
+        """
+        if not transcript:
+            return []
+        # Placeholder: estimate timing from word count
+        words = transcript.split()
+        avg_word_duration = 0.4  # seconds per word
+        keyframes = []
+        current_time = 0.0
+        for word in words:
+            keyframes.append({
+                "time": current_time,
+                "word": word,
+                "mouth_shape": "open" if word[-1:] in "aeiou" else "closed",
+                "intensity": LIP_SYNC_STRENGTH,
+            })
+            current_time += avg_word_duration
+        return keyframes
+
+    def align_segments_to_beats(self, segment_count=8, fps=25, base_frames=97):
+        """
+        Align segment boundaries to detected audio beats.
+
+        Args:
+            segment_count: Number of segments to generate
+            fps: Frame rate
+            base_frames: Base segment length in frames
+
+        Returns:
+            List of frame counts per segment (aligned to beats)
+        """
+        if not self.beat_map:
+            return [base_frames] * segment_count
+
+        # Find beats that are close to segment boundaries
+        segment_duration = base_frames / fps
+        aligned_lengths = []
+        current_time = 0.0
+
+        for i in range(segment_count):
+            target_end = current_time + segment_duration
+            # Find nearest beat to target_end
+            nearest_beat = min(self.beat_map, key=lambda b: abs(b - target_end),
+                            default=target_end)
+            if abs(nearest_beat - target_end) < segment_duration * 0.3:
+                actual_duration = nearest_beat - current_time
+            else:
+                actual_duration = segment_duration
+            frames = max(25, int(actual_duration * fps))
+            aligned_lengths.append(frames)
+            current_time += actual_duration
+
+        return aligned_lengths
+
+    def generate_voice(self, text, voice_preset="default"):
+        """
+        Generate voice audio from text (TTS placeholder).
+
+        Args:
+            text: Text to synthesize
+            voice_preset: Voice preset name
+
+        Returns:
+            Path to generated audio file, or empty string
+        """
+        # Placeholder for TTS integration
+        print(f"   [AudioSync] TTS placeholder: '{text[:50]}...' with voice={voice_preset}")
+        return ""
+
+    def get_camera_changes_on_beats(self, available_loras=None):
+        """
+        Suggest camera LoRA changes on beat boundaries.
+
+        Args:
+            available_loras: List of available camera LoRA names
+
+        Returns:
+            List of (beat_time, suggested_lora) tuples
+        """
+        if not self.beat_map or not available_loras:
+            return []
+        suggestions = []
+        for i, beat_time in enumerate(self.beat_map):
+            if i % 4 == 0:  # Change camera every 4 beats
+                lora = available_loras[i // 4 % len(available_loras)]
+                suggestions.append((beat_time, lora))
+        return suggestions
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FLOW STATE & INFINITE FLOW CONFIG - State tracking for infinite generation
+# ══════════════════════════════════════════════════════════════════════════════
+
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Any
+
+
+@dataclass
+class FlowState:
+    """Tracks all state between segments in infinite flow generation."""
+    current_anchor: Optional[str] = None  # Path to current anchor frame
+    embedding_bank: Any = None  # CharacterEmbeddingBank instance
+    color_histogram: Any = None  # Reference color histogram (numpy array)
+    segment_index: int = 0  # Current segment number
+    total_frames: int = 0  # Total frames generated so far
+    quality_scores: List[Dict] = field(default_factory=list)  # Per-segment quality
+    segment_paths: List[str] = field(default_factory=list)  # Paths to generated segments
+    prompts_used: List[str] = field(default_factory=list)  # Prompts for each segment
+    seeds_used: List[int] = field(default_factory=list)  # Seeds for each segment
+
+
+@dataclass
+class InfiniteFlowConfig:
+    """Groups all extension settings for infinite flow generation."""
+    segment_length: int = 81  # Frames per segment
+    max_segments: int = 8  # Maximum segments to generate
+    overlap_frames: int = 5  # Overlap between segments
+    overlap_mode: str = "linear_blend"  # Blend mode
+    overlap_side: str = "source"  # Which side contributes overlap
+    seed_mode: str = "fixed"  # "fixed", "increment", or "random"
+    base_seed: int = 2025  # Base seed value
+    use_prompt_variation: bool = False  # Vary prompts between segments
+    use_camera_variation: bool = False  # Vary camera between segments
+    continuation_prompt_template: str = ""  # Template for continuation prompts
+
+
+# Story quality keywords appended to every prompt in story-to-prompt workflow
+STORY_QUALITY_KEYWORDS = (
+    "Ultra HDR, 3D intricate details, vibrant colors, realistic lighting, "
+    "Dramatic Lighting, Enhanced Clarity, Brilliant Highlights, "
+    "Hyperrealistic Detailing, cinematic"
+)
+
+# Character overlap frames (separate from segment overlap)
+OVERLAP_FRAMES_CHARACTER = 8  # @param {type:"integer"}
+# Controls how many frames at the start of each new scene receive identity
+# injection from the character reference.
+
+LATENT_SEED_STRENGTH = 0.15  # @param {type:"number"}
+# How strongly to blend PersistentLatentSeed noise into initial latent.
+
+# Module-level storage for the most recent FlowState from generate_infinite_flow().
+# Cell 9 and subsequent cells can inspect this after generation completes.
+_LAST_FLOW_STATE = None
+
+
 
 # ── ComfyUI core ──────────────────────────────────────────────────────────────
 from nodes import NODE_CLASS_MAPPINGS, LoraLoaderModelOnly
@@ -268,26 +1413,147 @@ def import_custom_nodes() -> None:
         asyncio.get_event_loop().run_until_complete(_load())
 
 # ── VRAM helpers ──────────────────────────────────────────────────────────────
-def cleanup_memory(verbose: bool = False) -> None:
+def cleanup_memory(verbose: bool = False, force: bool = False) -> None:
     """Enhanced memory cleanup including ipc_collect for fragmentation."""
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()   # free IPC handles - reduces fragmentation
-    if verbose:
-        _print_vram()
-
-def aggressive_cleanup(label: str = "") -> None:
-    """Aggressive VRAM cleanup: double gc + synchronize + empty_cache + ipc_collect."""
+    gc.collect()
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
+    if force:
+        time.sleep(0.1)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    if verbose:
+        _print_vram()
+
+def aggressive_cleanup(label: str = "") -> None:
+    """Aggressive VRAM cleanup: triple gc + synchronize + empty_cache + ipc_collect."""
     gc.collect()
+    gc.collect()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+    # Only sleep if VRAM is still high after first gc pass
+    if torch.cuda.is_available() and torch.cuda.memory_allocated() / 1024**3 > 1.0:
+        time.sleep(0.1)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     if label:
         _print_vram(label)
+    # Warn if VRAM is still unexpectedly high
+    if torch.cuda.is_available():
+        allocated_gb = torch.cuda.memory_allocated() / 1024**3
+        if allocated_gb > 2.0:
+            print(f"   WARNING: {allocated_gb:.1f} GB still allocated after cleanup [{label}]")
+
+def _deep_unload_model(model, label: str = "") -> None:
+    """Shared helper: deeply unload a HuggingFace model from CUDA.
+
+    Removes accelerate dispatch hooks, moves all parameters/buffers to CPU,
+    runs triple gc, synchronize, empty_cache, ipc_collect, and prints verification.
+    """
+    if model is None:
+        return
+
+    # Remove accelerate dispatch hooks (they hold CUDA tensor references)
+    try:
+        from accelerate.hooks import remove_hook_from_module
+        remove_hook_from_module(model, recurse=True)
+    except Exception:
+        pass
+
+    # Delete _hf_hook if present
+    try:
+        if hasattr(model, '_hf_hook'):
+            del model._hf_hook
+    except Exception:
+        pass
+
+    # Explicitly move all parameters and buffers to CPU
+    try:
+        for p in model.parameters():
+            if p.device.type == 'cuda':
+                p.data = p.data.cpu()
+                if p.grad is not None:
+                    p.grad = p.grad.cpu()
+        for b in model.buffers():
+            if b.device.type == 'cuda':
+                b.data = b.data.cpu()
+    except Exception:
+        pass
+
+    try:
+        model.to("cpu")
+    except Exception:
+        pass
+
+    # Triple gc + CUDA cleanup
+    gc.collect()
+    gc.collect()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        # Only sleep if VRAM is still high
+        if torch.cuda.memory_allocated() / 1024**3 > 1.0:
+            time.sleep(0.1)
+        gc.collect()
+        torch.cuda.empty_cache()
+        allocated_mb = torch.cuda.memory_allocated() / 1024**2
+        if label:
+            print(f"   [{label}] Unloaded. VRAM allocated: {allocated_mb:.0f} MB")
+
+def force_unload_all_models() -> None:
+    """Nuclear option: walk all Python objects and forcibly unload any HF model on CUDA."""
+    try:
+        from transformers import PreTrainedModel
+    except ImportError:
+        return
+
+    unloaded = 0
+    for obj in gc.get_objects():
+        if isinstance(obj, PreTrainedModel):
+            try:
+                # Check if any parameter is on CUDA
+                has_cuda = any(p.device.type == 'cuda' for p in obj.parameters())
+                if not has_cuda:
+                    continue
+                # Remove accelerate hooks
+                try:
+                    from accelerate.hooks import remove_hook_from_module
+                    remove_hook_from_module(obj, recurse=True)
+                except Exception:
+                    pass
+                # Move all params to CPU
+                for p in obj.parameters():
+                    if p.device.type == 'cuda':
+                        p.data = p.data.cpu()
+                        if p.grad is not None:
+                            p.grad = p.grad.cpu()
+                for b in obj.buffers():
+                    if b.device.type == 'cuda':
+                        b.data = b.data.cpu()
+                unloaded += 1
+            except Exception:
+                pass
+
+    if unloaded > 0:
+        print(f"   force_unload_all_models: moved {unloaded} model(s) to CPU")
+    gc.collect()
+    gc.collect()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 def _print_vram(label: str = "") -> None:
     if not torch.cuda.is_available():
@@ -2120,7 +3386,7 @@ print("   ✓ mount_google_drive()      — Drive persistence helpers")
 # @markdown `POSITIVE_PROMPT` manually in Cell 6.
 
 # ── LLM prompt expander (LTX2PromptArchitect node) ───────────────────────────
-LLM_MODEL  = "8B"    # @param ["8B", "3B", "14B"]
+LLM_MODEL  = "3B"    # @param ["8B", "3B", "14B"]
 # "8B"  → NeuralDaredevil-8B-abliterated  — best quality, ~10 GB VRAM
 # "3B"  → Llama-3.2-3B-abliterated       — fastest, ~4 GB (T4 safe)
 # "14B" → Qwen3-14B-abliterated           — highest quality, ~18 GB VRAM
@@ -2304,7 +3570,7 @@ SECONDARY_CHARACTER = ""  # @param {type:"string"}
 #  charcoal grey suit with no tie, confident posture, slight smile"
 
 # ── Decomposer Settings ──────────────────────────────────────────────────────
-SCRIPT_LLM_MODEL = "8B"  # @param ["8B", "3B", "14B"]
+SCRIPT_LLM_MODEL = "3B"  # @param ["8B", "3B", "14B"]
 # LLM model for script decomposition.
 
 AUTO_CAMERA_SELECT = True  # @param {type:"boolean"}
@@ -2423,9 +3689,15 @@ def decompose_script_to_scenes(
     scenes_list = []
     sentences_per_segment = max(1, len(sentences) // num_segments)
 
-    # Build quality/style prefix
+    # Build quality/style prefix (enhanced with mandatory quality keywords)
     quality_prefix = _QUALITY_PROMPTS.get(quality, _QUALITY_PROMPTS["8K cinematic"])
     style_prefix = _STYLE_PROMPTS.get(style, _STYLE_PROMPTS["realistic"])
+
+    # Append mandatory quality keywords to every scene prompt
+    _mandatory_quality = globals().get("STORY_QUALITY_KEYWORDS",
+        "Ultra HDR, 3D intricate details, vibrant colors, realistic lighting, "
+        "Dramatic Lighting, Enhanced Clarity, Brilliant Highlights, "
+        "Hyperrealistic Detailing, cinematic")
 
     # Character prefix (injected into every scene for consistency)
     char_prefix = ""
@@ -2510,6 +3782,7 @@ def decompose_script_to_scenes(
             _scene_ctx += f"Second character: {secondary_char}. "
         _scene_ctx += f"Visual style: {style}. "
         _scene_ctx += f"Camera movement: {camera_lora}. "
+        _scene_ctx += f"Quality: {_mandatory_quality}. "
         if has_dialogue and language != "English":
             _scene_ctx += f"Dialogue language: {language}. "
 
@@ -2532,7 +3805,7 @@ def decompose_script_to_scenes(
 
         # Build scene dict
         scene_dict = {
-            "user_input": _llm_input,  # RAW action for LLM to expand professionally
+            "user_input": _llm_input + " " + _mandatory_quality,  # Append quality keywords DIRECTLY
             "image_path": _char_image_path if seg_idx == 0 else None,
             "frames": frames_per_segment,
             "seed": _seed + seg_idx,
@@ -2826,23 +4099,23 @@ MULTI_FRAME_ANCHOR_COUNT = 3    # @param {type:"integer"}
 # Number of frames from previous segment used as conditioning anchor.
 # More frames = stronger temporal consistency but slightly slower.
 
-USE_CHARACTER_EMBEDDING_BANK = False  # @param {type:"boolean"}
+USE_CHARACTER_EMBEDDING_BANK = True  # @param {type:"boolean"}
 # Accumulate character features across segments for consistency.
 # Uses CharacterEmbeddingBank class to average features over time.
 
-USE_STYLE_LOCK = False   # @param {type:"boolean"}
+USE_STYLE_LOCK = True   # @param {type:"boolean"}
 # Lock visual style by averaging multiple anchor frame latents.
 # Creates a "style constraint" that prevents drift across segments.
 
-USE_MOTION_COHERENCE = False  # @param {type:"boolean"}
+USE_MOTION_COHERENCE = True  # @param {type:"boolean"}
 # Enable optical flow estimation between segments for smooth motion.
 # Auto-selects camera LoRA based on detected motion direction.
 
-USE_VELOCITY_INJECTION = False  # @param {type:"boolean"}
+USE_VELOCITY_INJECTION = True  # @param {type:"boolean"}
 # Inject velocity vector (frame[-2] - frame[-1]) into initial noise.
 # Maintains motion momentum between segments.
 
-USE_ADAPTIVE_OVERLAP = False  # @param {type:"boolean"}
+USE_ADAPTIVE_OVERLAP = True  # @param {type:"boolean"}
 # Replace fixed OVERLAP_FRAMES with adaptive computation.
 # High motion = fewer overlap frames, low motion = more overlap frames.
 
@@ -2970,7 +4243,7 @@ AUTO_INCREMENT_SEED = True  # @param {type:"boolean"}
 # ── Model filenames ───────────────────────────────────────────────────────────
 UNET_MODEL      = "ltx-2-19b-distilled_Q4_K_M.gguf"
 # Gemma: choose ONE matching your GPU (fp4 for Blackwell, fp8 for T4/A100)
-CLIP_NAME1      = "gemma_3_12B_it_fp4_mixed.safetensors"
+CLIP_NAME1      = "gemma_3_12B_it_fp4_mixed.safetensors"  # fp8 for T4 (use fp4 only on Blackwell)
 CLIP_NAME2      = "ltx-2-19b-embeddings_connector_distill_bf16.safetensors"
 VAE_VIDEO_MODEL = "LTX2_video_vae_bf16.safetensors"
 VAE_AUDIO_MODEL = "LTX2_audio_vae_bf16.safetensors"
@@ -3101,6 +4374,7 @@ print(f"   Parallel exp : {USE_PARALLEL_PROMPT_EXPANSION}")
 # @markdown ## 💥 7. Define generate_pro()
 # @markdown Run this cell once per session. Edit Cells 5-6 and re-run Cell 9.
 
+@vram_guard
 def generate_pro(
     user_input:              str   = USER_INPUT,
     image_path:              str   = IMAGE_PATH,
@@ -3269,6 +4543,18 @@ def generate_pro(
     _export_timeline = export_timeline if export_timeline is not None else EXPORT_TIMELINE
     _persist_to_gdrive = persist_to_gdrive if persist_to_gdrive is not None else PERSIST_TO_GDRIVE
 
+    # ── Apply VRAMManager optimal settings (unless user explicitly overrode) ──
+    _vram_settings = _VRAM_MGR.get_optimal_settings()
+    if _VRAM_MGR.is_t4 or _VRAM_MGR.is_low_vram:
+        # Cap frames if user did not explicitly set a lower value
+        _vram_max_frames = _vram_settings.get("max_frames", frames)
+        if frames > _vram_max_frames:
+            frames = _vram_max_frames
+        # Enable tiled VAE for low VRAM if not explicitly set
+        if use_tiled_vae is None or use_tiled_vae == USE_TILED_VAE:
+            if _vram_settings.get("use_tiled_vae", False):
+                use_tiled_vae = True
+
     print("🎬 LTX-2 PRO — Generation Starting")
     print(f"   Resolution   : {width}×{height}  |  Frames: {frames}  |  Seed: {seed}")
     print(f"   Mode         : {'I2V' if image_path else 'T2V'}"
@@ -3362,8 +4648,29 @@ def generate_pro(
     else:
         print("   [EasyPrompt] Bypassed — using manual POSITIVE_PROMPT.")
 
-    # LLM/Vision should now be unloaded — free VRAM before loading video model
-    cleanup_memory(verbose=True)
+    # LLM/Vision should now be unloaded — aggressive VRAM cleanup before CLIP
+    print("\n   Aggressive VRAM cleanup (pre-CLIP)...")
+    aggressive_cleanup("pre-CLIP cleanup")
+
+    # Only call force_unload_all_models if VRAM is still high (retry path)
+    if torch.cuda.is_available():
+        _allocated = torch.cuda.memory_allocated() / 1024**3
+        if _allocated > 2.0:
+            print(f"   WARNING: {_allocated:.1f} GB still allocated! Running force_unload...")
+            force_unload_all_models()
+            cleanup_memory(force=True)
+            aggressive_cleanup("pre-CLIP retry")
+            _allocated = torch.cuda.memory_allocated() / 1024**3
+            if _allocated > 2.0:
+                print(f"   CRITICAL: {_allocated:.1f} GB still in use after force cleanup!")
+
+    _print_vram()
+
+    # Enforce sequential loading for T4
+    if _VRAM_MGR.is_t4:
+        _VRAM_MGR.enforce_sequential_loading("CLIP", 10.0)
+    else:
+        _VRAM_MGR.enforce_sequential_loading("CLIP", 8.0)
 
     # ══════════════════════════════════════════════════════════════════════
     # PHASE 1A - TEXT ENCODING (CLIP loaded, used, then freed before UNet)
@@ -3384,8 +4691,8 @@ def generate_pro(
                     device="default"), 0)
         except Exception as e:
             print(f"   ⚠️  fp4 CLIP failed ({type(e).__name__}: {e})")
-            print("      Trying fp8 fallback (gemma_3_12B_it_fp8_scaled.safetensors)...")
-            fp8 = "gemma_3_12B_it_fp8_scaled.safetensors"
+            print("      Trying fp8 fallback (gemma_3_12B_it_fp4_mixed.safetensors)...")
+            fp8 = "gemma_3_12B_it_fp4_mixed.safetensors"
             try:
                 clip_model = get_value_at_index(
                     clip_loader.load_clip(
@@ -3433,6 +4740,10 @@ def generate_pro(
         # Delete CLIP now - frees ~6-8 GB for UNet
         del clip_model
         aggressive_cleanup("CLIP deleted")
+
+        # Verify CLIP is fully freed before UNet
+        if _VRAM_MGR.is_t4:
+            _VRAM_MGR.enforce_sequential_loading("UNet", 6.0)
 
         # ══════════════════════════════════════════════════════════════════
         # PHASE 1B - UNET LOADING (after CLIP is freed from VRAM)
@@ -4191,9 +5502,10 @@ def generate_pro(
     return output_path
 
 
-print("✅ generate_pro() and generate_extended_video() defined — run Cell 9 to generate.")
+print("✅ generate_pro(), generate_extended_video(), and generate_infinite_flow() defined.")
 print("   generate_pro(): Single clip generation with character consistency")
 print("   generate_extended_video(): SVI-Pro style multi-segment with overlap blending")
+print("   generate_infinite_flow(): Enhanced infinite flow with FlowState tracking")
 
 
 def generate_extended_video(
@@ -4559,6 +5871,131 @@ def generate_extended_video(
     return final_path
 
 
+def generate_infinite_flow(
+    user_input=None,
+    image_path=None,
+    positive_prompt=None,
+    negative_prompt=None,
+    width=None,
+    height=None,
+    fps=None,
+    seed=None,
+    image_strength=None,
+    character_image_path=None,
+    character_strength=None,
+    character_mode=None,
+    character_name=None,
+    character_description=None,
+    config=None,
+    flow_state=None,
+    output_prefix=None,
+    **kwargs,
+):
+    """
+    Generate an infinite-length video using enhanced SVI-Pro-style segment iteration.
+
+    This is the v2.0 replacement for generate_extended_video with FlowState tracking
+    and InfiniteFlowConfig support. Adds segment-level prompt variation and
+    continuation prompt generation for long videos.
+
+    Args:
+        user_input: Story description
+        image_path: Starting image path
+        config: InfiniteFlowConfig instance (overrides individual settings)
+        flow_state: FlowState instance for tracking (created if None)
+        **kwargs: Additional arguments passed to generate_pro()
+
+    Returns:
+        Final stitched video path, or None on failure.
+    """
+    # Resolve defaults from globals
+    _user_input = user_input if user_input is not None else globals().get('USER_INPUT', '')
+    _image_path = image_path if image_path is not None else globals().get('IMAGE_PATH')
+    _pos_prompt = positive_prompt if positive_prompt is not None else globals().get('POSITIVE_PROMPT', '')
+    _neg_prompt = negative_prompt if negative_prompt is not None else globals().get('NEGATIVE_PROMPT', '')
+    _width = width if width is not None else globals().get('WIDTH', 768)
+    _height = height if height is not None else globals().get('HEIGHT', 512)
+    _fps = fps if fps is not None else globals().get('FPS', 25)
+    _seed = seed if seed is not None else globals().get('SEED', 47)
+    _img_str = image_strength if image_strength is not None else globals().get('IMAGE_STRENGTH', 1.0)
+    _char_img = character_image_path if character_image_path is not None else globals().get('CHARACTER_IMAGE_PATH')
+    _char_str = character_strength if character_strength is not None else globals().get('CHARACTER_STRENGTH', 1.0)
+    _char_mode = character_mode if character_mode is not None else globals().get('CHARACTER_CONSISTENCY_MODE', 'both')
+    _char_name = character_name if character_name is not None else globals().get('CHARACTER_NAME', 'Character')
+    _char_desc = character_description if character_description is not None else globals().get('CHARACTER_DESCRIPTION', '')
+    _prefix = output_prefix if output_prefix is not None else globals().get('OUTPUT_PREFIX', 'LTX-2-PRO')
+
+    # Use InfiniteFlowConfig if provided
+    if config is None:
+        config = InfiniteFlowConfig(
+            segment_length=globals().get('SEGMENT_LENGTH', 81),
+            max_segments=globals().get('MAX_SEGMENTS', 8),
+            overlap_frames=globals().get('OVERLAP_FRAMES', 5),
+            overlap_mode=globals().get('OVERLAP_MODE', 'linear_blend'),
+            overlap_side=globals().get('OVERLAP_SIDE', 'source'),
+            seed_mode=globals().get('SEGMENT_SEED_MODE', 'fixed'),
+            base_seed=_seed,
+        )
+
+    # Initialize FlowState if not provided
+    if flow_state is None:
+        flow_state = FlowState()
+
+    # Delegate to generate_extended_video with FlowState tracking
+    result = generate_extended_video(
+        user_input=_user_input,
+        image_path=_image_path,
+        positive_prompt=_pos_prompt,
+        negative_prompt=_neg_prompt,
+        width=_width,
+        height=_height,
+        fps=_fps,
+        seed=config.base_seed,
+        image_strength=_img_str,
+        character_image_path=_char_img,
+        character_strength=_char_str,
+        character_mode=_char_mode,
+        character_name=_char_name,
+        character_description=_char_desc,
+        segment_length=config.segment_length,
+        max_segments=config.max_segments,
+        overlap_frames=config.overlap_frames,
+        overlap_mode=config.overlap_mode,
+        overlap_side=config.overlap_side,
+        segment_seed_mode=config.seed_mode,
+        output_prefix=_prefix,
+        **kwargs,
+    )
+
+    # Update FlowState
+    if result:
+        flow_state.segment_index = config.max_segments
+        # Populate segment_paths from the segment cache directory
+        _cache_dir = f"/content/ComfyUI/output/{_prefix}_segments"
+        if os.path.isdir(_cache_dir):
+            import glob
+            _seg_files = sorted(glob.glob(os.path.join(_cache_dir, "segment_*.mp4")))
+            flow_state.segment_paths = _seg_files
+            # Calculate actual total frames from segment count and config
+            _actual_segments = len(_seg_files) if _seg_files else config.max_segments
+            flow_state.total_frames = (
+                _actual_segments * config.segment_length
+                - max(0, _actual_segments - 1) * config.overlap_frames
+            )
+        else:
+            flow_state.total_frames = config.max_segments * config.segment_length
+        # Record the prompt and seed used
+        flow_state.prompts_used.append(_user_input or _pos_prompt)
+        flow_state.seeds_used.append(config.base_seed)
+
+    # Store the FlowState at module level so Cell 9 and subsequent cells can access it
+    global _LAST_FLOW_STATE
+    _LAST_FLOW_STATE = flow_state
+
+    return result
+
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CELL 8  ─  STORYBOARD / MULTI-SCENE RUNNER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4577,7 +6014,7 @@ SCENES = [
     {
         "user_input"    : "a woman enters a dimly lit café, shaking rain from her coat, looks around",
         "image_path"    : CHARACTER_IMAGE_PATH,   # use character image as first-frame seed
-        "frames"        : 97,
+        "frames"        : 121,
         "seed"          : SEED,
         "output_prefix" : f"Story01-{CHARACTER_NAME}",
         "character_image_path": CHARACTER_IMAGE_PATH,
@@ -4596,7 +6033,7 @@ SCENES = [
     {
         "user_input"    : "she notices something outside and leans forward, face half lit by neon glow",
         "image_path"    : None,   # filled by continuity from scene 2
-        "frames"        : 97,
+        "frames"        : 121,
         "seed"          : SEED + 2,
         "output_prefix" : f"Story03-{CHARACTER_NAME}",
         "character_image_path": CHARACTER_IMAGE_PATH,
@@ -4604,7 +6041,7 @@ SCENES = [
     },
 ]
 
-USE_STORYBOARD = False  # @param {type:"boolean"}
+USE_STORYBOARD = True  # @param {type:"boolean"}
 # Set True in Cell 9 to run all scenes instead of a single clip.
 
 
@@ -5040,9 +6477,9 @@ try:
             print(f"🔢 Next seed: {SEED}")
 
     elif USE_SEGMENT_EXTENSION:
-        # ── SVI-Pro extended video mode ───────────────────────────────────
-        print("🎬 Running SVI-Pro segment extension mode…")
-        output = generate_extended_video(
+        # ── SVI-Pro extended video mode (via Infinite Flow Engine) ────────
+        print("🎬 Running Infinite Flow segment extension mode...")
+        output = generate_infinite_flow(
             user_input             = USER_INPUT,
             image_path             = IMAGE_PATH,
             positive_prompt        = POSITIVE_PROMPT,
@@ -5057,12 +6494,6 @@ try:
             character_mode         = CHARACTER_CONSISTENCY_MODE,
             character_name         = CHARACTER_NAME,
             character_description  = CHARACTER_DESCRIPTION,
-            segment_length         = SEGMENT_LENGTH,
-            max_segments           = MAX_SEGMENTS,
-            overlap_frames         = OVERLAP_FRAMES,
-            overlap_mode           = OVERLAP_MODE,
-            overlap_side           = OVERLAP_SIDE,
-            segment_seed_mode      = SEGMENT_SEED_MODE,
             output_prefix          = OUTPUT_PREFIX,
             # Pass through sampling settings
             pass1_sigmas           = PASS1_SIGMAS,
@@ -5591,3 +7022,59 @@ if BATCH_COLOR_GRADE_TARGET and COLOR_GRADE != "none" and os.path.exists(BATCH_C
         print(f"   ⚠️  Batch grading failed ({e})")
 
 print("\n✅ Post-processing complete.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CELL 11  ─  USAGE INSTRUCTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# @title  { "single-column": true }
+# @markdown ## 11. Usage Instructions
+# @markdown
+# @markdown ### Story-to-Prompt Workflow (Step by Step)
+# @markdown
+# @markdown **Step 1 - Write Your Story:**
+# @markdown Set `SCRIPT_INPUT` in Cell 4.5 with your narrative script.
+# @markdown Example: "A woman enters a rooftop bar at sunset. She walks to
+# @markdown the railing and looks over the city."
+# @markdown
+# @markdown **Step 2 - Define Characters:**
+# @markdown Set `CHARACTER_DEFINITION` in Cell 4.5 with detailed character
+# @markdown description. Include: age, ethnicity, hair, clothing, body type.
+# @markdown Upload a reference image to `CHARACTER_IMAGE_PATH` in Cell 5.
+# @markdown
+# @markdown **Step 3 - Configure Quality:**
+# @markdown Choose `VIDEO_QUALITY` and `VIDEO_STYLE` in Cell 4.5.
+# @markdown Set `TARGET_VIDEO_DURATION` for total length desired.
+# @markdown
+# @markdown **Step 4 - Enable Decomposer:**
+# @markdown Set `USE_SCRIPT_DECOMPOSER = True` in Cell 4.5.
+# @markdown Run Cell 4.5 to see the scene breakdown.
+# @markdown
+# @markdown **Step 5 - Generate:**
+# @markdown Run Cell 9 to generate all scenes sequentially.
+# @markdown The system auto-chains scenes with character consistency.
+# @markdown
+# @markdown ### Three Generation Modes
+# @markdown
+# @markdown 1. **Single Clip**: Set `USE_STORYBOARD=False`,
+# @markdown    `USE_SEGMENT_EXTENSION=False` in Cell 9. Edit `USER_INPUT`
+# @markdown    in Cell 6 and run Cell 9.
+# @markdown
+# @markdown 2. **Storyboard**: Edit `SCENES` list in Cell 8, set
+# @markdown    `USE_STORYBOARD=True`, run Cell 9.
+# @markdown
+# @markdown 3. **Infinite Flow**: Set `USE_SEGMENT_EXTENSION=True`,
+# @markdown    configure segment settings in Cell 5, run Cell 9.
+# @markdown    Uses generate_infinite_flow() with FlowState tracking.
+# @markdown
+# @markdown ### Key Tips
+# @markdown
+# @markdown - For T4 GPUs: Keep frames <= 97, use 3B LLM, enable tiled VAE
+# @markdown - For character consistency: Use mode="both" with a clear reference image
+# @markdown - For long videos: Use Infinite Flow mode with overlap_frames=5
+# @markdown - For best prompts: Let the LLM expand (BYPASS_EASY_PROMPT=False)
+# @markdown - Quality keywords are auto-injected via STORY_QUALITY_KEYWORDS
+
+print("Usage instructions loaded. See markdown above for workflow guide.")
+print("Three modes available: Single Clip, Storyboard, Infinite Flow")
