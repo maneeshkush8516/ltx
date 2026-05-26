@@ -1891,6 +1891,33 @@ def _load_audio_vae(vae_name: str):
     return NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=vae_name)
 
 
+def save_frames_as_mp4(frames_np, output_path: str, fps: int = 25, crf: int = 19) -> str:
+    """Save numpy frames array as h264 MP4 using ffmpeg with proper quality settings.
+    
+    Replaces direct imageio.mimsave(codec='libx264') calls which produce low quality output.
+    Uses ffmpeg with crf=19, yuv420p, and medium preset to match VHS_VideoCombine quality.
+    """
+    import imageio
+    _temp = output_path + ".raw.mp4"
+    imageio.mimsave(_temp, [f for f in frames_np], fps=fps)
+    try:
+        subprocess.run([
+            "ffmpeg", "-y", "-i", _temp,
+            "-c:v", "libx264", "-crf", str(crf),
+            "-pix_fmt", "yuv420p", "-preset", "medium",
+            "-movflags", "+faststart",
+            output_path
+        ], check=True, capture_output=True)
+        os.remove(_temp)
+    except Exception:
+        # Fallback: just rename the raw file
+        if os.path.exists(_temp):
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            os.rename(_temp, output_path)
+    return output_path
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # LoRA stack helpers (LTX2MasterLoaderLD + manual fallback)
 # Mirrors node [263] LTX2MasterLoaderLD in LD-I2V.json
@@ -5784,8 +5811,9 @@ def generate_extended_video(
         else:
             print(f"   ⚠️  Could not extract anchor — next segment may lack continuity.")
         
-        # Cleanup between segments
-        aggressive_cleanup(f"segment {seg_num} done")
+        # Cleanup between segments - force full VRAM release before next segment loads UNet
+        force_unload_all_models()
+        aggressive_cleanup("inter-segment")
     
     # Final stitching with overlap blending
     if len(all_segment_paths) < 1:
@@ -5828,7 +5856,7 @@ def generate_extended_video(
     # Save final stitched video
     final_frames_np = (combined_frames.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
     final_path = f"/content/ComfyUI/output/{output_prefix}_extended_{int(time.time())}.mp4"
-    imageio.mimsave(final_path, [f for f in final_frames_np], fps=fps, codec='libx264')
+    save_frames_as_mp4(final_frames_np, final_path, fps=fps)
     
     elapsed = time.time() - t0
     total_duration = len(combined_frames) / fps
@@ -6339,7 +6367,7 @@ def run_storyboard(
                     import imageio
                     # Save frames first, then mux audio from source clips
                     _temp_stitch = final_path.replace('.mp4', '_temp_noaudio.mp4')
-                    imageio.mimsave(_temp_stitch, [f for f in final_np], fps=FPS, codec='libx264')
+                    save_frames_as_mp4(final_np, _temp_stitch, fps=FPS)
                     
                     # Try to mux audio from source clips
                     _stitch_has_audio = False
@@ -6784,7 +6812,7 @@ def merge_clips_to_video(
         
         # Step 1: Save video frames to a temporary file
         _temp_video = output_path.replace('.mp4', '_temp_noaudio.mp4')
-        imageio.mimsave(_temp_video, [f for f in final_np], fps=fps, codec='libx264')
+        save_frames_as_mp4(final_np, _temp_video, fps=fps)
         
         # Step 2: Extract and concatenate audio from source clips, then mux
         _has_audio = False
@@ -7018,7 +7046,7 @@ if BATCH_COLOR_GRADE_TARGET and COLOR_GRADE != "none" and os.path.exists(BATCH_C
         _graded = apply_color_grade(_tensor, COLOR_GRADE)
         _graded_np = (_graded.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
         _graded_path = BATCH_COLOR_GRADE_TARGET.replace(".mp4", f"_{COLOR_GRADE}.mp4")
-        imageio.mimsave(_graded_path, [f for f in _graded_np], fps=FPS, codec='libx264')
+        save_frames_as_mp4(_graded_np, _graded_path, fps=FPS)
         print(f"   ✓ Graded video saved: {_graded_path}")
         if SHOW_PREVIEWS:
             display_video(_graded_path)

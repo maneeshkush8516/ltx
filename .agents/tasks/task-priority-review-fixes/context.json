@@ -1,0 +1,19 @@
+{
+  "project_type": "Python Colab notebook (single-file) for AI video generation using ComfyUI backend",
+  "language": "Python",
+  "build_system": "None (single .py file, validated via AST parse)",
+  "test_framework": "AST parse validation only (no test suite)",
+  "build_command": "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\"",
+  "test_command": "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\"",
+  "verification_instructions": "Run AST parse check to confirm valid Python syntax after all edits",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - this is a single-file project",
+  "environment_constraints": "No external packages or runtime available. The file must remain AST-parseable Python. No Colab/ComfyUI runtime to test against.",
+  "contribution_requirements": "All Colab shell commands (! and %) must remain commented out. Code must be valid Python (AST parseable).",
+  "key_patterns": "ComfyUI NODE_CLASS_MAPPINGS pattern for node instantiation; get_value_at_index() for extracting tuple results; aggressive_cleanup() and force_unload_all_models() for VRAM management; VAE is loaded via NODE_CLASS_MAPPINGS['VAELoader']().load_vae(vae_name=X); Audio VAE via _load_audio_vae() helper",
+  "relevant_files": [
+    "LTX_PRO.py",
+    "LTX2EasyPromptLD.py"
+  ],
+  "directory_structure": "Single directory with LTX_PRO.py (main 7084-line file to modify), LTX2EasyPromptLD.py (reference for SYSTEM_PROMPT), and workflow JSON files"
+}
