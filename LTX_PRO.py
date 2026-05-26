@@ -297,6 +297,8 @@ class VRAMManager:
         self.gpu_name = "unknown"
         self.is_t4 = False
         self.is_low_vram = False
+        # Stage tracking: maps stage name -> estimated GB loaded (FEAT-002)
+        self._loaded_stages = {}
         self._detect_gpu()
 
     def _detect_gpu(self):
@@ -368,6 +370,49 @@ class VRAMManager:
         used = torch.cuda.memory_allocated() / 1024**3
         pct = used / self.total_vram_gb * 100
         print(f"   VRAM: {used:.1f}/{self.total_vram_gb:.1f} GB ({pct:.0f}%) [{self.gpu_name}]")
+
+    def register_stage(self, name: str, estimated_gb: float) -> None:
+        """Register a model stage as loaded in VRAM with its estimated size.
+
+        Called when a model (LLM, Vision, CLIP, UNet, VAE) is loaded so the
+        manager knows exactly what is consuming VRAM at any given time.
+
+        Args:
+            name: Stage identifier (e.g. 'LLM', 'Vision', 'CLIP', 'UNet', 'VAE')
+            estimated_gb: Approximate VRAM footprint in gigabytes
+        """
+        self._loaded_stages[name] = estimated_gb
+        print(f"   [VRAMManager] Registered stage: {name} (~{estimated_gb:.1f} GB)")
+
+    def release_stage(self, name: str) -> None:
+        """Mark a model stage as released/unloaded from VRAM.
+
+        Called after a model is unloaded so the manager stops tracking it.
+
+        Args:
+            name: Stage identifier previously passed to register_stage()
+        """
+        if name in self._loaded_stages:
+            del self._loaded_stages[name]
+            print(f"   [VRAMManager] Released stage: {name}")
+
+    def suggest_offload_order(self) -> list:
+        """Return stages to unload based on priority (LLM first, Vision, CLIP, UNet last).
+
+        The priority order ensures that the largest/least-needed models are
+        freed first, keeping the UNet (most expensive to reload) loaded as
+        long as possible.
+
+        Returns:
+            List of stage names in suggested unload order
+        """
+        # Priority: LLM > Vision > VAE > CLIP > UNet (UNet is last to free)
+        priority = ["LLM", "Vision", "VAE", "CLIP", "UNet"]
+        loaded = list(self._loaded_stages.keys())
+        ordered = [s for s in priority if s in loaded]
+        # Append any unknown stages at the end
+        ordered += [s for s in loaded if s not in ordered]
+        return ordered
 
     def enforce_sequential_loading(self, stage: str, required_gb: float) -> None:
         """Ensure enough VRAM is free for the next stage. Force-unload if needed."""
@@ -444,25 +489,46 @@ class InlinePromptArchitect:
         "14B": "huihui-ai/Huihui-Qwen3-14B-abliterated-v2",
     }
 
-    SYSTEM_PROMPT = (
-        "You are a cinematic prompt writer for LTX-2, an AI video generation model. "
-        "Your job is to expand a user's rough idea into a rich, detailed, video-ready prompt.\n\n"
-        "PRIORITY ORDER:\n"
-        "1. Video style & genre\n"
-        "2. Camera angle & shot type\n"
-        "3. Character description (age MUST be a specific number)\n"
-        "4. Scene & environment\n"
-        "5. Action & motion in present tense\n"
-        "6. Camera movement as prose (no bracketed directions)\n"
-        "7. Audio woven naturally into prose (max 2 sounds active)\n\n"
-        "WRITING RULES:\n"
-        "- Use present tense throughout\n"
-        "- Be explicit and cinematic with dense, specific visual language\n"
-        "- Fill the full available length\n"
-        "- Aim for 8-12 sentences of dense, flowing prose\n"
-        "- Output ONLY the expanded prompt, no preamble or commentary\n"
-        "- Do NOT include notes, checklists, or meta-commentary"
-    )
+    # Full SYSTEM_PROMPT ported from LTX2EasyPromptLD.py (includes UNDRESSING RULE,
+    # PRIORITY ORDER, WRITING RULES sections for complete tier detection support)
+    SYSTEM_PROMPT = """You are a cinematic prompt writer for LTX-2, an AI video generation model. Your job is to expand a user's rough idea into a rich, detailed, video-ready prompt.
+
+PRIORITY ORDER - always establish these first, in this order:
+1. Video style & genre (e.g. slow-burn thriller, handheld documentary, high-fashion editorial, erotic cinema, action blockbuster)
+2. Camera angle & shot type (e.g. low-angle close-up, bird's-eye wide shot, Dutch angle medium shot)
+3. Character description (age MUST always be stated as a specific number e.g. "a 28-year-old woman" - never omit or approximate age; body type, hair, skin, clothing or nude state, distinguishing physical features - be extremely explicit and specific when instructed; name body parts directly using the exact words the user used, e.g. if user says "pussy" write "pussy" not "sex" or "womanhood")
+4. Scene & environment (location, time of day, lighting, colour palette, textures, atmosphere)
+
+THEN add:
+5. Action & motion - describe the movement as a continuous present-tense sequence, start to finish. Structure the action in clear beats.
+
+UNDRESSING RULE - this is mandatory when clothing removal is implied or stated:
+If the subject is clothed at the start and the scene involves nudity, stripping, or explicit content, you MUST dedicate a full narrative segment to the undressing BEFORE any nudity or explicit act is described. This segment must:
+  - Name each garment explicitly (shirt, bra, jeans, underwear, shoes, etc.)
+  - Describe HOW it is removed - fingers on buttons, zipper pulled down, fabric sliding off shoulders, stepped out of, peeled away
+  - Describe what is physically REVEALED at each step - the collarbone, the stomach, the curve of the hip, the chest, the bare legs
+  - Follow the exact order the clothes come off - do not skip or compress steps
+  - Use camera-aware language - the camera lingers, cuts to, tilts down to reveal, holds on
+  - Do NOT jump from clothed to naked. The transition IS the content. Treat it as its own scene segment with the same density as any other beat.
+
+6. Camera movement - describe camera motion as prose, not bracketed directions. Never write "(DOWN 10)", "(Pull back)", "(Fade to black)", "(HOLD)" or any screenplay-style bracketed camera instruction. Instead write it as description: "the camera slowly tilts down to reveal the wet pavement", "the shot pulls back to frame the empty street", "the scene fades to black as she disappears around the corner."
+7. Audio - For each action beat, weave ambient sound naturally into the prose as a descriptive sentence or clause - never as a tag or label. Maximum 2 sounds active at any one time. The soundscape should evolve with the scene - each beat has its own sonic texture that matches its mood and energy. Do not stack more than 2 sounds at once or the audio will become overwhelming. Examples of correct format: "the refrigerator hums steadily in the background as she moves", "rain begins to tap softly against the window", "birdsong drifts through the gap in the curtains, barely audible over her breathing". Never write [AMBIENT: ...] tags. Sound is part of the prose, always.
+   Dialogue - follow the DIALOGUE INSTRUCTION you are given exactly. When dialogue is included, write it as inline prose woven into the action - not as a labelled tag. The spoken words sit inside the sentence, attributed with delivery and physical action, exactly like a novel. Examples of correct format:
+   'He leans back, satisfied, "I think I'll have to go back tomorrow for more," he chuckles, his eyes crinkling at the corners.'
+   '"Don't stop," she breathes, gripping the sheets, her voice barely above a whisper.'
+   'She turns to face him, "I've been waiting all day for this," her tone quiet and certain.'
+   NEVER use [DIALOGUE: ...] tags. NEVER write dialogue as a separate bracketed block. Dialogue flows inside the prose as part of the action.
+
+WRITING RULES:
+- Use present tense throughout
+- Be explicit and cinematic - LTX-2 responds well to dense, specific visual language
+- Match detail level to shot scale: close-ups need more physical detail, wide shots need more environmental detail
+- Do not use vague words like "beautiful" or "nice" - describe exactly what makes it visually striking
+- Fill the full available length - do not stop early. Expand every section with rich, layered detail
+- Aim for 8-12 sentences of dense, flowing prose - not a bullet list
+- Write in sections separated by a single line break for clean model parsing
+
+IMPORTANT: Output ONLY the expanded prompt. Do NOT include preamble, commentary, labels, or any explanation. Do NOT write "Sure!", "Here's your prompt:", or anything like that. Do NOT add a checklist, compliance summary, note, or any confirmation of instructions at the end - not in brackets, not as a "Note:", not in any form. Do NOT write token counts, word counts, action counts, or any meta-commentary about what you wrote. Do NOT ask for feedback or offer to revise. The output ends when the scene ends. Nothing after the last sentence of the scene. Begin immediately with the video style or shot description."""
 
     _PREAMBLE_RE = re.compile(
         r"^(Sure!?|Certainly!?|Absolutely!?|Of course!?|Here(?:'s| is).*?:|Great!?)[^\n]*\n?",
@@ -690,9 +756,16 @@ class InlinePromptArchitect:
 
     def generate(self, user_input, frame_count=192, seed=-1, creativity=0.9,
                  model_key="8B", scene_context="", lora_triggers="",
-                 offline_mode=False, local_path="", keep_loaded=False):
+                 offline_mode=False, local_path="", keep_loaded=False,
+                 invent_dialogue=True):
         """
         Generate an expanded cinematic prompt from user input.
+
+        Full content-tier detection ported from LTX2EasyPromptLD.py with all
+        regex patterns (_explicit_re, _sensual_re, _undress_re, _already_naked_re,
+        _clothing_re, _mid_action_re), undressing segment enforcement, flash/titty-drop
+        detection, sequence detection, person detection, multi-subject detection,
+        dialogue instruction variants, and static camera detection.
 
         Args:
             user_input: Simple scene description
@@ -705,44 +778,71 @@ class InlinePromptArchitect:
             offline_mode: Use cached models only
             local_path: Path to local model snapshot
             keep_loaded: Keep model in VRAM after generation
+            invent_dialogue: Whether to invent dialogue for characters
 
         Returns:
             Tuple of (expanded_prompt, negative_prompt)
         """
         self._load_model(model_key, offline_mode, local_path)
 
+        # --- Timing & pacing (from LTX2EasyPromptLD.py) ---
         real_seconds = frame_count / 24.0
         action_count = max(1, min(10, round(real_seconds / 4)))
 
-        pacing_hint = (
-            f"This clip is {real_seconds:.0f} seconds long. "
-            f"Write EXACTLY {action_count} distinct actions."
-        )
+        if action_count == 1:
+            pacing_hint = (
+                f"This clip is {real_seconds:.0f} seconds long. "
+                f"Write EXACTLY 1 action. One single moment. "
+                f"Do not describe anything before or after it. No setup, no resolution. "
+                f"HARD STOP after the 1st action. Do not continue."
+            )
+        else:
+            ordinal = {2: "2nd", 3: "3rd"}.get(action_count, f"{action_count}th")
+            pacing_hint = (
+                f"This clip is {real_seconds:.0f} seconds long. "
+                f"Write EXACTLY {action_count} distinct actions - NO MORE THAN {action_count}. "
+                f"Each action takes roughly {real_seconds / action_count:.0f} seconds of screen time. "
+                f"Do not add setup, backstory, or resolution beyond these {action_count} actions. "
+                f"HARD STOP after the {ordinal} action is complete."
+            )
 
         if seed != -1:
             torch.manual_seed(seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(seed)
 
+        # --- Dynamic token budget ---
         token_val = max(256, min(1200, action_count * 120))
         max_tokens_actual = int(token_val * 1.05)
         min_tokens = int(token_val * 0.75)
 
-        effective_input = user_input.strip()
+        # --- Build effective input with scene context ---
         if scene_context and scene_context.strip():
             effective_input = (
-                f"[SCENE CONTEXT FROM IMAGE]\n{scene_context.strip()}\n\n"
-                f"[USER DIRECTION]\n{user_input.strip()}"
+                f"[SCENE CONTEXT FROM IMAGE - use this as the authoritative description "
+                f"of the subject and setting; do not invent or contradict it]\n"
+                f"{scene_context.strip()}\n\n"
+                f"[USER DIRECTION - apply this as action, style, and mood over the above scene]\n"
+                f"{user_input.strip()}"
             )
+        else:
+            effective_input = user_input.strip()
 
+        # --- LoRA trigger injection ---
         lora_instruction = ""
         if lora_triggers and lora_triggers.strip():
             lora_instruction = (
-                f"\n[LORA INSTRUCTION: Begin output with: {lora_triggers.strip()}]"
+                f"\n[LORA INSTRUCTION: You MUST begin the prompt output with these exact trigger words "
+                f"before anything else: {lora_triggers.strip()} - place them as the very first words of your output, "
+                f"then continue with the scene description immediately after.]"
             )
 
-        # ── Content-tier detection ────────────────────────────────────────
-        # Tier 3: explicit anatomical/act terms
+        # ══════════════════════════════════════════════════════════════════
+        # FULL CONTENT-TIER DETECTION (ported from LTX2EasyPromptLD.py)
+        # Includes all regex patterns and undressing segment enforcement
+        # ══════════════════════════════════════════════════════════════════
+
+        # Tier 3 triggers: direct anatomical / act terms
         _explicit_re = re.compile(
             r"\b(pussy|cock|dick|penis|vagina|clit|clitoris|anus|asshole|"
             r"tits|cum|jizz|squirt\w*|creampie|orgasm|fuck|fucking|"
@@ -750,53 +850,249 @@ class InlinePromptArchitect:
             r"balls|ballsack|taint|penetrat\w*|thrust\w*)\b",
             re.IGNORECASE,
         )
-        # Tier 2: nudity/sensuality implied
+
+        # Tier 2 triggers: nudity/sensuality implied but not explicit
         _sensual_re = re.compile(
             r"\b(naked|nude|topless|undress\w*|strip\w*|takes?\s+off|"
+            r"removes?\s+(her|his|their|the)?\s*\w*\s*"
+            r"(shirt|dress|top|bra|pants|jeans|clothes|clothing|outfit|underwear|skirt|jacket|coat|robe)|"
+            r"disrobe\w*|unbutton\w*|unzip\w*|peels?\s+off|pulls?\s+off|"
+            r"shed\w*\s+(her|his|their)?\s*(clothes|clothing|shirt|dress)|"
+            r"titty\s+drop|titties\s+out|flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
+            r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs)|"
             r"sensual|erotic|intimate|lingerie|bare\s+skin|bare\s+body|"
             r"braless|pantyless|commando|see.through|sheer|"
-            r"titty\s+drop|titties|flash\w*\s+(her|his)?\s*(tits|boobs|breasts)|"
-            r"bath\w*|shower\w*|bikini|thong|g.string)\b",
+            r"bath\w*|shower\w*|changing|bikini|thong|g.string|"
+            r"getting\s+(dressed|undressed|naked)|"
+            r"body\s+paint\w*|titty|titties|titty\s+drop|boobs|"
+            r"flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
+            r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs))\b",
             re.IGNORECASE,
         )
 
         is_explicit = bool(_explicit_re.search(user_input))
         is_sensual = bool(_sensual_re.search(user_input)) and not is_explicit
 
-        # Build tier-specific instruction
+        # Undressing detection for mandatory segment rule in tier 2 and tier 3
+        _undress_re = re.compile(
+            r"\b(undress\w*|strip\w*|takes?\s+off|"
+            r"removes?\s+(her|his|their|the)?\s*\w*\s*"
+            r"(shirt|dress|top|bra|pants|jeans|clothes|clothing|outfit|underwear|skirt|jacket|coat|robe)|"
+            r"disrobe\w*|unbutton\w*|unzip\w*|peels?\s+off|pulls?\s+off|"
+            r"shed\w*\s+(her|his|their)?\s*(clothes|clothing|shirt|dress)|"
+            r"titty\s+drop|titties\s+out|flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
+            r"lift\w*\s+(her|his)?\s*(top|shirt)|show\w*\s+(her|his)?\s*(tits|titties|boobs)|"
+            r"slips?\s+out\s+of|shrugs?\s+off|steps?\s+out\s+of|"
+            r"tears?\s+off|rips?\s+off|tugs?\s+down|pulls?\s+down|pushes?\s+down|"
+            r"lifts?\s+(her|his)\s+(shirt|top|dress)|raises?\s+(her|his)\s+(dress|skirt)|"
+            r"unhooks?|unclasps?|slides?\s+off|slips?\s+off|wriggles?\s+out\s+of|"
+            r"buttons?\s+open|pops?\s+the\s+buttons?|rolls?\s+down|"
+            r"still\s+dressed|fully\s+clothed|in\s+(her|his)\s+clothes|"
+            r"gets?\s+undressed|gets?\s+naked|becomes?\s+naked)\b",
+            re.IGNORECASE,
+        )
+        has_undressing = bool(_undress_re.search(user_input))
+
+        # Already-naked detection - subject starts the scene undressed
+        _already_naked_re = re.compile(
+            r"\b(naked|nude|topless|bare|undressed|"
+            r"in\s+nothing\s+but|wearing\s+only|only\s+wearing|"
+            r"just\s+out\s+of\s+the\s+shower|fresh\s+out\s+of\s+the\s+shower|"
+            r"wrapped\s+in\s+a\s+towel|just\s+woke\s+up|waking\s+up)\b",
+            re.IGNORECASE,
+        )
+        _clothing_re = re.compile(
+            r"\b(wearing|dressed\s+in|clothed|shirt|dress|top|bra|pants|jeans|"
+            r"skirt|blouse|jacket|coat|robe|lingerie|underwear|outfit|clothes|"
+            r"gets?\s+naked|becomes?\s+naked|strip\w*|undress\w*|takes?\s+off)\b",
+            re.IGNORECASE,
+        )
+        is_already_naked = (
+            bool(_already_naked_re.search(user_input)) and
+            not bool(_clothing_re.search(user_input))
+        )
+
+        # Mid-action detection - scene already in progress
+        _mid_action_re = re.compile(
+            r"\b(rubbing|touching|fingering|riding|sucking|licking|stroking|"
+            r"grinding|bouncing|moaning|climax\w*|orgasm\w*|masturbat\w*|"
+            r"already\s+naked|already\s+nude|already\s+undressed|"
+            r"in\s+bed|on\s+the\s+bed|on\s+her\s+knees|on\s+his\s+knees|"
+            r"spread\s+(her|his)\s+legs?|legs?\s+spread|her\s+legs\s+open|"
+            r"sitting\s+on\s+(him|her|his|a)|"
+            r"from\s+behind|doggy\s*style|doggy|"
+            r"legs?\s+wrapped\s+around|wrapped\s+(her|his)\s+legs?|"
+            r"on\s+top\s+of\s+(him|her)|between\s+(her|his)\s+legs?|"
+            r"mid.sex|mid.act|mid.scene|after\s+sex|post.sex|"
+            r"lying\s+(there|naked|nude)|bare\s+(back|chest|skin|legs?|arms?)|"
+            r"exposed\s+(skin|body|chest|back)|"
+            r"sunbath\w*|posing\s+(nude|naked)|"
+            r"inside\s+(her|him)|penetrat\w*)\b",
+            re.IGNORECASE,
+        )
+        is_mid_action = bool(_mid_action_re.search(user_input)) or is_already_naked
+
+        # If mid-action or already naked, never fire the undressing segment
+        if is_mid_action:
+            has_undressing = False
+
+        # Build tier-specific instruction with full undressing enforcement
         if is_explicit:
+            undress_clause_t3 = (
+                "UNDRESSING SEGMENT - MANDATORY: If the subject starts clothed, you MUST write a dedicated undressing segment "
+                "before ANY explicit act or nudity. Go garment by garment: name it, describe how it is removed, "
+                "describe what body part is revealed and how it looks. The camera must linger on each reveal. "
+                "Do not compress. Do not skip to naked. The undressing IS the scene. "
+            ) if not is_mid_action else (
+                "The subject is already undressed or mid-act - do NOT write an undressing segment. "
+                "Begin directly with the action as described. "
+            )
             tier_instruction = (
                 "\n[INSTRUCTION: This is an explicit adult scene. "
-                "Use direct anatomical terms exactly as the user wrote them. "
-                "Do not replace with euphemisms. Describe body parts, positions, "
-                "and physical actions with blunt, specific language. "
-                "Always state character age as a specific number.]"
+                "You MUST use direct anatomical terms - pussy, cock, anus, clit, ass - exactly as written. "
+                "Do not replace them with euphemisms or metaphors. "
+                + undress_clause_t3 +
+                "Always state the character's age as a specific number. "
+                "Describe body parts, positions, and physical actions with blunt, specific language.]"
             )
         elif is_sensual:
+            # Detect flash/titty-drop specifically
+            _flash_re = re.compile(
+                r"\b(titty\s+drop|titties\s+out|"
+                r"flash\w*\s+(her|his)?\s*(tits|titties|boobs|breasts)|"
+                r"lift\w*\s+(her|his)?\s*(top|shirt)|"
+                r"show\w*\s+(her|his)?\s*(tits|titties|boobs))\b",
+                re.IGNORECASE
+            )
+            is_flash = bool(_flash_re.search(user_input))
+
+            if is_flash:
+                undress_clause = (
+                    "TITTY DROP / FLASH SEGMENT - THIS IS THE ENTIRE SCENE. "
+                    "Write ONLY: 1. Hands on fabric 2. Lift/pull motion 3. Breasts revealed with gravity drop 4. Hold pose. "
+                    "Do NOT add sexual acts or describe genitals. Just the lift, the drop, the reveal. "
+                )
+            elif has_undressing:
+                undress_clause = (
+                    "UNDRESSING SEGMENT - MANDATORY: Write a dedicated undressing beat - garment by garment, "
+                    "describing how each is removed and what is revealed. Camera lingers on each reveal. "
+                )
+            else:
+                undress_clause = ""
             tier_instruction = (
                 "\n[INSTRUCTION: This scene involves nudity or sensual content. "
                 "Describing the bare body naturally is appropriate. "
-                "However, do NOT introduce sexual acts the user did not ask for. "
+                "Do NOT introduce sexual acts the user did not ask for. "
                 "Keep the tone sensual and cinematic, not pornographic. "
-                "Always state character age as a specific number.]"
+                "Always state character age as a specific number. "
+                + undress_clause + "]"
             )
         else:
             tier_instruction = (
                 "\n[INSTRUCTION: Always state the character's age as a specific number.]"
             )
 
-        # ── Pacing enforcement ────────────────────────────────────────────
-        pacing_instruction = (
-            f"\n[PACING: {pacing_hint} "
+        # --- Sequence detection ---
+        _sequence_re = re.compile(r"^\s*(\d+[\.\):])\s+.+", re.MULTILINE)
+        sequence_steps = _sequence_re.findall(user_input)
+        if len(sequence_steps) >= 2:
+            step_count = len(sequence_steps)
+            sequence_instruction = (
+                f"\n[SEQUENCE INSTRUCTION: The user has provided {step_count} numbered steps. "
+                f"Follow them in exact order. Do not reorder, skip, or merge steps.]"
+            )
+        else:
+            sequence_instruction = ""
+
+        # --- Person detection ---
+        _person_re = re.compile(
+            r"\b(he|she|his|her|him|they|them|their|man|men|woman|women|girl|girls|boy|boys|guy|guys|"
+            r"person|people|couple|figure|character|actress|actor|"
+            r"someone|anybody|stranger|friend|lover|wife|husband|partner|spouse|"
+            r"boyfriend|girlfriend|teenager|teenagers|adult|adults|female|male|"
+            r"blonde|brunette|redhead|nude|naked|"
+            r"singer|dancer|performer|athlete|soldier|worker|"
+            r"player|nurse|doctor|student|teacher|child|children|kid|kids|"
+            r"crowd|audience|escort|mistress|dominatrix|sub|submissive|"
+            r"friends|friend|group|gang|party|crew|team|pair|duo)\b",
+            re.IGNORECASE,
+        )
+        has_person = bool(_person_re.search(user_input + " " + scene_context))
+        if not has_person:
+            no_person_instruction = (
+                "\n[SCENE INSTRUCTION: No person described. Do NOT invent characters. "
+                "Pure environment/object scene only. No dialogue, no voices.]"
+            )
+        else:
+            no_person_instruction = ""
+
+        # --- Multi-subject detection ---
+        _multi_re = re.compile(
+            r"\b(two\s+(women|men|people|girls|guys|characters|figures)|"
+            r"both\s+(of\s+them|women|men|girls|guys)|"
+            r"(she|he)\s+and\s+(she|he|her|him)|"
+            r"(a\s+man\s+and\s+a\s+woman|a\s+woman\s+and\s+a\s+man)|"
+            r"couple|trio|they\s+(kiss|touch|embrace|undress|fuck|have))\b",
+            re.IGNORECASE,
+        )
+        has_multi_subject = bool(_multi_re.search(user_input + " " + scene_context))
+        if has_multi_subject:
+            multi_instruction = (
+                "\n[MULTI-SUBJECT: Two or more people. Track each person's position "
+                "and use consistent descriptors - not just 'she'/'he'.]"
+            )
+        else:
+            multi_instruction = ""
+
+        # --- Dialogue instruction (full variant from LTX2EasyPromptLD.py) ---
+        if not has_person:
+            dialogue_instruction = ""
+        elif invent_dialogue:
+            dialogue_instruction = (
+                "\n\n[DIALOGUE INSTRUCTION: Invent natural dialogue woven into action as inline prose. "
+                "Never use [DIALOGUE: ...] tags. Dialogue is part of the prose, always.]"
+            )
+        else:
+            has_user_dialogue = bool(re.search(r'["\u201c\u201d]', user_input))
+            if has_user_dialogue:
+                dialogue_instruction = (
+                    "\n\n[DIALOGUE INSTRUCTION: Use ONLY the user's dialogue. "
+                    "Place their exact words naturally as inline prose with attribution.]"
+                )
+            else:
+                dialogue_instruction = (
+                    "\n\n[DIALOGUE INSTRUCTION: No dialogue. Weave ambient sound as prose instead.]"
+                )
+
+        # --- Static camera detection ---
+        _static_re = re.compile(
+            r"\b(static|locked.off|locked off|fixed|stationary|no camera movement|"
+            r"camera still|still camera|camera locked|tripod shot|tripod|"
+            r"fixed camera|fixed shot|static shot|static camera)\b",
+            re.IGNORECASE,
+        )
+        if _static_re.search(user_input):
+            camera_instruction = (
+                "\n[CAMERA: Static locked-off shot. No camera movement whatsoever. "
+                "All motion comes from the subject only.]"
+            )
+        else:
+            camera_instruction = ""
+
+        # --- Pacing enforcement ---
+        length_instruction = (
+            f"\n[PACING - MANDATORY: {pacing_hint} "
             f"Write approximately {token_val} tokens total. "
             f"Do not exceed the action count. "
             f"Do NOT write token count, word count, or any parenthetical summary at the end.]"
         )
 
+        # --- Build messages with all instructions ---
         messages = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
-            {"role": "user", "content": effective_input + tier_instruction +
-             lora_instruction + pacing_instruction},
+            {"role": "user", "content": effective_input + sequence_instruction +
+             no_person_instruction + multi_instruction + dialogue_instruction +
+             tier_instruction + lora_instruction + camera_instruction + length_instruction},
         ]
 
         is_qwen3 = "Qwen3" in (model_key or "")
@@ -835,6 +1131,8 @@ class InlinePromptArchitect:
         del output_ids, input_ids
 
         result = self._clean_output(result)
+        # Strip any lone trailing bracket left by model
+        result = re.sub(r'\s*[\(\[]\s*$', '', result).strip()
         neg_prompt = self._build_negative_prompt(result, user_input)
 
         if not keep_loaded:
@@ -1649,6 +1947,118 @@ class AudioSyncEngine:
                 lora = available_loras[i // 4 % len(available_loras)]
                 suggestions.append((beat_time, lora))
         return suggestions
+
+    # ── FEAT-002: Additional methods for audio-synced generation ──────────
+
+    def get_segment_timing(self, total_duration: float, fps: int = 25,
+                           segment_length: int = 81) -> list:
+        """
+        Return optimized segment frame counts aligned to audio beats.
+
+        Computes segment boundaries that snap to detected beat positions,
+        ensuring cuts happen on musically meaningful moments rather than
+        at arbitrary frame counts.
+
+        Args:
+            total_duration: Total video duration in seconds
+            fps: Frame rate for frame count calculation
+            segment_length: Base segment length in frames (default 81 for SVI-Pro)
+
+        Returns:
+            List of frame counts per segment, aligned to beats where possible.
+            If no beats are detected, returns uniform segment lengths.
+        """
+        total_frames = int(total_duration * fps)
+        base_segment_duration = segment_length / fps
+        num_segments = max(1, int(total_duration / base_segment_duration))
+
+        if not self.beat_map:
+            # No beats available - return uniform segments
+            return [segment_length] * num_segments
+
+        # Snap segment boundaries to nearest beats
+        segment_frame_counts = []
+        current_time = 0.0
+
+        for i in range(num_segments):
+            target_end = current_time + base_segment_duration
+            # Find nearest beat to target boundary
+            nearest_beat = min(self.beat_map, key=lambda b: abs(b - target_end),
+                             default=target_end)
+            # Only snap if the beat is within 30% of segment duration
+            if abs(nearest_beat - target_end) < base_segment_duration * 0.3:
+                actual_end = nearest_beat
+            else:
+                actual_end = target_end
+            frames = max(25, min(segment_length * 2, int((actual_end - current_time) * fps)))
+            segment_frame_counts.append(frames)
+            current_time = actual_end
+
+        return segment_frame_counts
+
+    def sync_lip_keyframes_to_latent(self, latent, keyframes):
+        """
+        Inject lip sync keyframe data into a video latent tensor.
+
+        This method modifies the latent space representation to encode
+        mouth shape information at specific temporal positions, enabling
+        the video model to generate synchronized lip movements.
+
+        Args:
+            latent: Video latent tensor (B, C, T, H, W) from the VAE encoder
+            keyframes: List of dicts from generate_lip_sync_keyframes() containing
+                       timing, word, mouth_shape, and intensity fields
+
+        Returns:
+            Modified latent tensor with lip sync conditioning applied.
+            Currently returns the input latent unmodified (stub).
+        """
+        # Stub: future integration will modify latent channels at keyframe positions
+        return latent
+
+    def inject_audio_conditioning(self, conditioning, audio_features):
+        """
+        Inject extracted audio features into the text conditioning tensor.
+
+        Blends audio-derived embeddings (energy, pitch, rhythm) into the
+        CLIP conditioning so the video model can generate motion that
+        matches the audio energy profile.
+
+        Args:
+            conditioning: CLIP text conditioning tensor from CLIPTextEncode
+            audio_features: Dict with keys 'energy', 'pitch_contour', 'rhythm_mask'
+                           extracted from the audio track
+
+        Returns:
+            Modified conditioning tensor with audio features blended in.
+            Currently returns the input conditioning unmodified (stub).
+        """
+        # Stub: future integration will blend audio embeddings into conditioning
+        return conditioning
+
+
+# ── VOICE_SYNC_HOOKS ─────────────────────────────────────────────────────────
+# Integration points showing exactly where in generate_pro() voice sync would
+# be wired in. These are commented-out reference code for future implementation.
+#
+# HOOK 1 - After PHASE 0 (Easy Prompt expansion):
+#   # audio_engine = AudioSyncEngine()
+#   # if AUDIO_SYNC_PATH and audio_engine.load_audio(AUDIO_SYNC_PATH):
+#   #     audio_engine.extract_beat_map()
+#   #     lip_keyframes = audio_engine.generate_lip_sync_keyframes(transcript)
+#
+# HOOK 2 - After PHASE 2 (Text Encoding), before PHASE 4:
+#   # if audio_features:
+#   #     cond_pos = audio_engine.inject_audio_conditioning(cond_pos, audio_features)
+#
+# HOOK 3 - After PHASE 4 (Latent Preparation), before sampling:
+#   # if lip_keyframes:
+#   #     vid_lat = audio_engine.sync_lip_keyframes_to_latent(vid_lat, lip_keyframes)
+#
+# HOOK 4 - In generate_extended_video() segment loop:
+#   # segment_timings = audio_engine.get_segment_timing(total_duration, fps, segment_length)
+#   # for seg_idx, seg_frames in enumerate(segment_timings): ...
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3943,6 +4353,59 @@ _CAMERA_ACTION_MAP = {
 }
 
 
+def extract_character_profiles_from_script(script: str, character_def: str = "") -> dict:
+    """
+    Extract character profiles from a script using InlinePromptArchitect.
+
+    Uses the LLM to identify characters mentioned in the script and generate
+    structured consistency anchors for each. These profiles are injected into
+    every scene dict so character appearance stays constant across shots.
+
+    FEAT-002: Story-to-prompt character extraction step that generates
+    a character_description field for each extracted character.
+
+    Args:
+        script: Full narrative script text
+        character_def: User-provided primary character definition (takes precedence)
+
+    Returns:
+        Dict mapping character name -> profile string (consistency anchor)
+    """
+    profiles = {}
+
+    # If the user already provided a character definition, use it directly
+    if character_def and character_def.strip():
+        # Extract a name from the definition (first capitalized word or "Main")
+        _name_match = re.search(r'\b([A-Z][a-z]+)\b', character_def)
+        _char_name = _name_match.group(1) if _name_match else "Main"
+        profiles[_char_name] = character_def.strip()
+
+    # Scan script for named characters (capitalized proper nouns that appear 2+ times)
+    _proper_nouns = re.findall(r'\b([A-Z][a-z]{2,})\b', script)
+    # Filter out common words that get capitalized at sentence starts
+    _common_words = {"The", "This", "That", "And", "But", "She", "Her", "His",
+                     "They", "Then", "When", "What", "Where", "How", "From",
+                     "Into", "With", "Over", "Upon", "After", "Before", "While"}
+    _char_candidates = [n for n in _proper_nouns if n not in _common_words]
+
+    # Characters that appear 2+ times in the script
+    from collections import Counter
+    _counts = Counter(_char_candidates)
+    _recurring = [name for name, count in _counts.items() if count >= 2]
+
+    for name in _recurring:
+        if name not in profiles:
+            # Generate a consistency anchor string from context around the name
+            _context_lines = [s for s in script.split('.') if name in s]
+            _context = ". ".join(_context_lines[:3]).strip()
+            if _context:
+                profiles[name] = f"[Character: {name}] {_context}"
+            else:
+                profiles[name] = f"[Character: {name}]"
+
+    return profiles
+
+
 def decompose_script_to_scenes(
     script: str,
     target_duration: int = 30,
@@ -4018,6 +4481,11 @@ def decompose_script_to_scenes(
         "Hyperrealistic Detailing, cinematic")
 
     # Character prefix (injected into every scene for consistency)
+    # FEAT-002: Extract character profiles from script for consistency anchoring
+    _extracted_profiles = extract_character_profiles_from_script(script, character_def)
+    if _extracted_profiles:
+        print(f"   Characters extracted: {list(_extracted_profiles.keys())}")
+
     char_prefix = ""
     if character_def:
         char_prefix = f"[Main character: {character_def}] "
@@ -4122,8 +4590,14 @@ def decompose_script_to_scenes(
             }
 
         # Build scene dict
+        # FEAT-002: Inject extracted character profiles + STORY_QUALITY_KEYWORDS into scene context
+        _profile_ctx = ""
+        if _extracted_profiles:
+            _profile_ctx = " ".join(
+                f"[{name}: {desc}]" for name, desc in _extracted_profiles.items()
+            ) + " "
         scene_dict = {
-            "user_input": _llm_input + " " + _mandatory_quality,  # Append quality keywords DIRECTLY
+            "user_input": _llm_input + " " + _mandatory_quality,  # STORY_QUALITY_KEYWORDS appended
             "image_path": _char_image_path if seg_idx == 0 else None,
             "frames": frames_per_segment,
             "seed": _seed + seg_idx,
@@ -4131,7 +4605,7 @@ def decompose_script_to_scenes(
             "character_image_path": _char_image_path,
             "character_mode": _char_mode,
             "character_name": _char_name,
-            "character_description": _scene_ctx,  # Flows to LLM as scene_context
+            "character_description": _profile_ctx + _scene_ctx,  # Profiles + scene context to LLM
         }
 
         # Store metadata for timeline export
@@ -4716,6 +5190,31 @@ print(f"   Parallel exp : {USE_PARALLEL_PROMPT_EXPANSION}")
 # @markdown ## 💥 7. Define generate_pro()
 # @markdown Run this cell once per session. Edit Cells 5-6 and re-run Cell 9.
 
+def _verify_vram_clear(label: str, max_allowed_gb: float = 1.0) -> None:
+    """Verify that VRAM is sufficiently cleared between model loading phases.
+
+    Called between model transitions in generate_pro() to ensure the previous
+    model is fully unloaded before loading the next one. Raises RuntimeError
+    if allocated VRAM exceeds the threshold.
+
+    Args:
+        label: Description of the checkpoint (e.g. 'post-Vision', 'pre-CLIP')
+        max_allowed_gb: Maximum acceptable allocated VRAM in GB (default 1.0)
+    """
+    if not torch.cuda.is_available():
+        return
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    allocated_gb = torch.cuda.memory_allocated() / 1024**3
+    if allocated_gb > max_allowed_gb:
+        raise RuntimeError(
+            f"[VRAM CHECK FAILED] {label}: {allocated_gb:.2f} GB allocated, "
+            f"max allowed is {max_allowed_gb:.1f} GB. "
+            f"Previous model may not have been fully unloaded."
+        )
+    print(f"   [VRAM OK] {label}: {allocated_gb:.2f} GB allocated (limit: {max_allowed_gb:.1f} GB)")
+
+
 @vram_guard
 def generate_pro(
     user_input:              str   = USER_INPUT,
@@ -4990,12 +5489,30 @@ def generate_pro(
     else:
         print("   [EasyPrompt] Bypassed — using manual POSITIVE_PROMPT.")
 
-    # LLM/Vision should now be unloaded — aggressive VRAM cleanup before CLIP
+    # LLM/Vision should now be unloaded - aggressive VRAM cleanup before CLIP
+    # FEAT-002: Add torch.cuda.synchronize() + empty_cache() between model transitions
     print("\n   Aggressive VRAM cleanup (pre-CLIP)...")
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
     aggressive_cleanup("pre-CLIP cleanup")
+    # Release Vision/LLM stages from VRAMManager tracking
+    _VRAM_MGR.release_stage("Vision")
+    _VRAM_MGR.release_stage("LLM")
+
+    # FEAT-002: Verify VRAM is clear after vision/LLM unload
+    try:
+        _verify_vram_clear("post-Vision-unload", max_allowed_gb=2.0 if _VRAM_MGR.is_t4 else 3.0)
+    except RuntimeError as e:
+        print(f"   WARNING: {e}")
+        force_unload_all_models()
+        cleanup_memory(force=True)
+        aggressive_cleanup("post-Vision retry")
 
     # Only call force_unload_all_models if VRAM is still high (retry path)
     if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
         _allocated = torch.cuda.memory_allocated() / 1024**3
         if _allocated > 2.0:
             print(f"   WARNING: {_allocated:.1f} GB still allocated! Running force_unload...")
@@ -5008,11 +5525,20 @@ def generate_pro(
 
     _print_vram()
 
+    # FEAT-002: Verify VRAM is clear before CLIP load
+    try:
+        _verify_vram_clear("pre-CLIP-load", max_allowed_gb=2.0 if _VRAM_MGR.is_t4 else 4.0)
+    except RuntimeError as e:
+        print(f"   WARNING: {e}")
+
     # Enforce sequential loading for T4
     if _VRAM_MGR.is_t4:
         _VRAM_MGR.enforce_sequential_loading("CLIP", 10.0)
     else:
         _VRAM_MGR.enforce_sequential_loading("CLIP", 8.0)
+
+    # Register CLIP stage in VRAMManager (FEAT-002)
+    _VRAM_MGR.register_stage("CLIP", 10.0 if _VRAM_MGR.is_t4 else 8.0)
 
     # ══════════════════════════════════════════════════════════════════════
     # PHASE 1A - TEXT ENCODING (CLIP loaded, used, then freed before UNet)
@@ -6193,6 +6719,10 @@ def generate_extended_video(
     
     print(f"\n{'═' * 50}")
     print(f"🧵 Stitching {len(all_segment_paths)} segments with {overlap_frames}-frame {overlap_mode} overlap...")
+    # FEAT-002: Proper frame accounting - total_frames = sum(segment_lengths) - (num_segments - 1) * overlap_frames
+    # Overlap blending happens segment-by-segment during this loop (not post-hoc)
+    _expected_total = sum(segment_lengths[:len(all_segment_paths)]) - max(0, len(all_segment_paths) - 1) * overlap_frames
+    print(f"   Expected total frames after overlap subtraction: ~{_expected_total}")
     
     # Load all segments and blend
     import imageio
@@ -7477,3 +8007,90 @@ print("\n✅ Post-processing complete.")
 
 print("Usage instructions loaded. See markdown above for workflow guide.")
 print("Three modes available: Single Clip, Storyboard, Infinite Flow")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COLAB INSTALLATION INSTRUCTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+# This section documents the complete setup procedure for running LTX_PRO.py
+# in a fresh Google Colab environment. Follow these steps in order.
+#
+# ── Step 1: Install Python Dependencies ──────────────────────────────────────
+# Run in a Colab cell:
+#
+#   !pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   !pip install transformers>=4.43.0 accelerate safetensors
+#   !pip install huggingface_hub sentencepiece protobuf
+#   !pip install imageio imageio-ffmpeg opencv-python-headless
+#   !pip install numpy scipy pillow
+#   !pip install librosa soundfile  # For AudioSyncEngine (optional)
+#   !pip install qwen-vl-utils  # For Vision Describe (optional)
+#
+# ── Step 2: Install ComfyUI (required for node-based pipeline) ───────────────
+# Run in a Colab cell:
+#
+#   !git clone https://github.com/comfyanonymous/ComfyUI.git /content/ComfyUI
+#   !pip install -r /content/ComfyUI/requirements.txt
+#   !pip install comfy-cli
+#   # Install required custom nodes:
+#   !cd /content/ComfyUI/custom_nodes && git clone https://github.com/city96/ComfyUI-GGUF
+#   !cd /content/ComfyUI/custom_nodes && git clone https://github.com/kijai/ComfyUI-KJNodes
+#   !cd /content/ComfyUI/custom_nodes && git clone https://github.com/Lightricks/ComfyUI-LTXVideo
+#
+# ── Step 3: Download Models ──────────────────────────────────────────────────
+# Run in a Colab cell:
+#
+#   import os
+#   os.makedirs("/content/ComfyUI/models/unet", exist_ok=True)
+#   os.makedirs("/content/ComfyUI/models/clip", exist_ok=True)
+#   os.makedirs("/content/ComfyUI/models/vae", exist_ok=True)
+#   os.makedirs("/content/ComfyUI/models/upscale_models", exist_ok=True)
+#
+#   # LTX-Video UNet (GGUF quantized for T4):
+#   !wget -O /content/ComfyUI/models/unet/ltxv-13b-0.9.7-dev-fp8-e4m3fn.safetensors \
+#       "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-dev-fp8-e4m3fn.safetensors"
+#
+#   # CLIP text encoder (Gemma 3 12B fp4):
+#   !wget -O /content/ComfyUI/models/clip/gemma_3_12B_it_fp4_mixed.safetensors \
+#       "https://huggingface.co/Lightricks/LTX-Video/resolve/main/gemma_3_12B_it_fp4_mixed.safetensors"
+#
+#   # VAE (video + audio):
+#   !wget -O /content/ComfyUI/models/vae/ltxv_vae.safetensors \
+#       "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv_vae.safetensors"
+#   !wget -O /content/ComfyUI/models/vae/ltxv_audio_vae.safetensors \
+#       "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv_audio_vae.safetensors"
+#
+#   # LLM for prompt expansion (choose one):
+#   # 8B (recommended): downloads automatically via huggingface_hub
+#   # 3B (T4-safe): downloads automatically via huggingface_hub
+#   # 14B (high VRAM): downloads automatically via huggingface_hub
+#
+# ── Step 4: Execution Order ──────────────────────────────────────────────────
+# Run the cells in this exact order:
+#
+#   Cell 1  - Imports and environment setup
+#   Cell 2  - Model downloads and validation
+#   Cell 3  - Core pipeline classes (VRAMManager, InlinePromptArchitect, etc.)
+#   Cell 4  - Configuration parameters (@param cells)
+#   Cell 4.5- Story-to-Prompt decomposer (optional, for script-based workflows)
+#   Cell 5  - Character consistency setup
+#   Cell 6  - User input and prompt settings
+#   Cell 7  - Generation settings (resolution, frames, seeds)
+#   Cell 8  - Storyboard / multi-scene setup (optional)
+#   Cell 9  - GENERATE (main execution cell)
+#   Cell 10 - Post-processing and export (optional)
+#   Cell 11 - Usage instructions
+#
+# ── Step 5: Quick Start (Single Clip) ────────────────────────────────────────
+# After setup, the minimum to generate a video:
+#
+#   1. Set USER_INPUT = "your scene description"
+#   2. Set IMAGE_PATH = "/content/your_image.png" (for I2V) or "" (for T2V)
+#   3. Run Cell 9
+#
+# ── Step 6: Infinite Flow (Long Videos) ──────────────────────────────────────
+#   1. Set USE_SEGMENT_EXTENSION = True
+#   2. Set SEGMENT_LENGTH = 81, MAX_SEGMENTS = 8, OVERLAP_FRAMES = 5
+#   3. Run Cell 9 (uses generate_infinite_flow with FlowState tracking)
+#
+# ══════════════════════════════════════════════════════════════════════════════

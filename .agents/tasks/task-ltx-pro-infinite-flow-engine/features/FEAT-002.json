@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Integrate full EasyPrompt tier detection logic from LTX2EasyPromptLD.py into InlinePromptArchitect, tighten T4 VRAM optimization with strict sequential loading, integrate OVERLAP_FRAMES properly into generate_infinite_flow(), enhance story-to-prompt workflow with character extraction, and add audio sync foundation hooks.",
+  "status": "in_progress",
+  "steps": [
+    "In /projects/sandbox/ltx/LTX_PRO.py, replace the InlinePromptArchitect.generate() method's simplified tier detection (around line 710-760) with the FULL content-tier detection logic from LTX2EasyPromptLD.py (lines 542-830). This includes: (a) the full _explicit_re, _sensual_re, _undress_re, _already_naked_re, _clothing_re, _mid_action_re patterns; (b) undressing segment enforcement for tier 2 and tier 3; (c) flash/titty-drop detection in tier 2; (d) sequence detection for numbered steps; (e) person detection and no_person_instruction; (f) multi-subject detection and multi_instruction; (g) dialogue instruction variants (invent, user-provided, or none); (h) static camera detection. Also port the full SYSTEM_PROMPT from LTX2EasyPromptLD.py (line 157-216) replacing the simplified version in InlinePromptArchitect.",
+    "Upgrade the VRAMManager.enforce_sequential_loading() method (around line 345) to add explicit model stage tracking. Add a _loaded_stages dict attribute that tracks what is currently in VRAM. Add methods: register_stage(name, estimated_gb), release_stage(name). In generate_pro(), wrap each model loading phase with register/release calls so the manager knows exactly what is loaded. Add a new method suggest_offload_order() that returns stages to unload based on priority (LLM first, then Vision, then CLIP, UNet last).",
+    "In generate_pro() PHASE 0 (around line 4590), add explicit VRAM budget checking before loading LLM: if _VRAM_MGR.is_t4, enforce that vision model is fully unloaded before LLM loads, and LLM is fully unloaded before CLIP loads. Add torch.cuda.synchronize() + empty_cache() between each model transition. Add a _verify_vram_clear(label, max_allowed_gb=1.0) helper that raises if allocated VRAM exceeds threshold.",
+    "In generate_infinite_flow() (line 5874), properly integrate OVERLAP_FRAMES into the segment loop: (a) pass config.overlap_frames to generate_extended_video() correctly; (b) in generate_extended_video() around line 5680, ensure the overlap blending happens DURING stitching (not just at the end) by reading frames from each completed segment and blending immediately rather than post-hoc; (c) add proper frame accounting so total_frames calculation accounts for overlap reduction: total = sum(segment_lengths) - (num_segments - 1) * overlap_frames.",
+    "Enhance the decompose_script_to_scenes() function (line 3660) to add CHARACTER EXTRACTION & PROFILING step: (a) add a new function extract_character_profiles_from_script(script, character_def) that uses InlinePromptArchitect to generate structured character profiles from the script text; (b) for each extracted character, generate a consistency anchor string; (c) inject the character profile into every scene dict's character_description field; (d) add STORY_QUALITY_KEYWORDS append to the scene context so every generated prompt includes the mandatory quality suffix.",
+    "Expand the AudioSyncEngine class (around line 1200) with concrete integration points: (a) add a method get_segment_timing(total_duration, fps, segment_length) that returns optimized segment frame counts aligned to beats; (b) add stub methods with full docstrings for future integration: sync_lip_keyframes_to_latent(latent, keyframes), inject_audio_conditioning(conditioning, audio_features); (c) add a VOICE_SYNC_HOOKS section at the end of Cell 3 with commented-out integration points showing exactly where in generate_pro() voice sync would be wired in.",
+    "Add comprehensive inline comments throughout all modified sections explaining: what was changed, why, and how it relates to the reference files (LTX2EasyPromptLD.py, SVI-Pro-Workflow.json). Add a COLAB INSTALLATION INSTRUCTIONS section at the very end of the file (after Cell 11) with: pip install commands, model download commands, and step-by-step execution order."
+  ],
+  "acceptance_criteria": [
+    "python -m py_compile LTX_PRO.py passes without error",
+    "InlinePromptArchitect.generate() contains full content-tier detection with _explicit_re, _sensual_re, _undress_re, _already_naked_re, _mid_action_re patterns",
+    "InlinePromptArchitect.SYSTEM_PROMPT matches the full version from LTX2EasyPromptLD.py (contains 'UNDRESSING RULE' section)",
+    "VRAMManager has register_stage() and release_stage() methods",
+    "generate_pro() has _verify_vram_clear() calls between model loading phases",
+    "generate_extended_video() correctly subtracts overlap frames from total frame count",
+    "decompose_script_to_scenes() has extract_character_profiles_from_script() integration",
+    "AudioSyncEngine has get_segment_timing() method and voice sync hook comments",
+    "A COLAB INSTALLATION INSTRUCTIONS section exists at the end of the file",
+    "STORY_QUALITY_KEYWORDS is appended to scene prompts in the script decomposer"
+  ],
+  "verification": [
+    "Run: python -c \"import ast; ast.parse(open('/projects/sandbox/ltx/LTX_PRO.py').read()); print('AST OK')\"",
+    "Run: python -m py_compile /projects/sandbox/ltx/LTX_PRO.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
