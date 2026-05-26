@@ -197,13 +197,13 @@ dit_model = model_download(
 
 # ── Text encoders ─────────────────────────────────────────────────────────────
 # Gemma fp8 -- default for T4/A100 compatibility
-text_encoder_model = model_download(
-    f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
-    "/content/ComfyUI/models/text_encoders")
+#text_encoder_model = model_download(
+#    f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors",
+#    "/content/ComfyUI/models/text_encoders")
 # Gemma fp4 -- RTX 5000 Blackwell only (uncomment if on Blackwell):
-# text_encoder_model = model_download(
-#     f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
-#     "/content/ComfyUI/models/text_encoders")
+text_encoder_model = model_download(
+     f"{COMFYORG}/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+     "/content/ComfyUI/models/text_encoders")
 
 # Embeddings connector — distilled version (must match GGUF)
 text_encoder2_model = model_download(
@@ -229,6 +229,7 @@ upscaler_model = model_download(
     f"{LIGHTRIX}/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors",
     "/content/ComfyUI/models/latent_upscale_models")
 
+
 # ── IC LoRAs + Camera Control LoRAs ──────────────────────────────────────────
 # All used by LTX2MasterLoaderLD node [263] in LD-I2V.json
 LORA_URLS = {
@@ -238,11 +239,11 @@ LORA_URLS = {
     "Pose":        f"{LIGHTRIX}/LTX-2-19b-IC-LoRA-Pose-Control/resolve/main/ltx-2-19b-ic-lora-pose-control.safetensors",
     "Dolly-In":    f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-In/resolve/main/ltx-2-19b-lora-camera-control-dolly-in.safetensors",
     "Dolly-Left":  f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Left/resolve/main/ltx-2-19b-lora-camera-control-dolly-left.safetensors",
-    "Dolly-Out":   f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Out/resolve/main/ltx-2-19b-lora-camera-control-dolly-out.safetensors",
-    "Dolly-Right": f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Right/resolve/main/ltx-2-19b-lora-camera-control-dolly-right.safetensors",
-    "Jib-Down":    f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Jib-Down/resolve/main/ltx-2-19b-lora-camera-control-jib-down.safetensors",
-    "Jib-Up":      f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Jib-Up/resolve/main/ltx-2-19b-lora-camera-control-jib-up.safetensors",
-    "Static":      f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Static/resolve/main/ltx-2-19b-lora-camera-control-static.safetensors",
+    #"Dolly-Out":   f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Out/resolve/main/ltx-2-19b-lora-camera-control-dolly-out.safetensors",
+    #"Dolly-Right": f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Dolly-Right/resolve/main/ltx-2-19b-lora-camera-control-dolly-right.safetensors",
+    #"Jib-Down":    f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Jib-Down/resolve/main/ltx-2-19b-lora-camera-control-jib-down.safetensors",
+    #"Jib-Up":      f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Jib-Up/resolve/main/ltx-2-19b-lora-camera-control-jib-up.safetensors",
+    #"Static":      f"{LIGHTRIX}/LTX-2-19b-LoRA-Camera-Control-Static/resolve/main/ltx-2-19b-lora-camera-control-static.safetensors",
 }
 
 LORA_DIR = "/content/ComfyUI/models/loras"
@@ -253,7 +254,6 @@ for name, url in LORA_URLS.items():
     print(f"   {'✅' if r else '❌'}  {name}")
 
 print("\n✅ All model files downloaded.")
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CELL 3  ─  IMPORTS, HELPERS & CHARACTER CONSISTENCY SYSTEM
@@ -324,8 +324,8 @@ class VRAMManager:
                 "use_chunk_ff": True,
                 "llm_model": "3B",
                 "max_frames": 97,
-                "clip_precision": "fp8",
-                "clip_name": "gemma_3_12B_it_fp8_scaled.safetensors",
+                "clip_precision": "fp4",
+                "clip_name": "gemma_3_12B_it_fp4_mixed.safetensors",
                 "width": 768,
                 "height": 512,
             }
@@ -335,8 +335,8 @@ class VRAMManager:
                 "use_chunk_ff": False,
                 "llm_model": "8B",
                 "max_frames": 161,
-                "clip_precision": "fp8",
-                "clip_name": "gemma_3_12B_it_fp8_scaled.safetensors",
+                "clip_precision": "fp4",
+                "clip_name": "ggemma_3_12B_it_fp4_mixed.safetensors",
                 "width": 1024,
                 "height": 576,
             }
@@ -3390,7 +3390,7 @@ print("   ✓ mount_google_drive()      — Drive persistence helpers")
 # @markdown `POSITIVE_PROMPT` manually in Cell 6.
 
 # ── LLM prompt expander (LTX2PromptArchitect node) ───────────────────────────
-LLM_MODEL  = "8B"    # @param ["8B", "3B", "14B"]
+LLM_MODEL  = "3B"    # @param ["8B", "3B", "14B"]
 # "8B"  → NeuralDaredevil-8B-abliterated  — best quality, ~10 GB VRAM
 # "3B"  → Llama-3.2-3B-abliterated       — fastest, ~4 GB (T4 safe)
 # "14B" → Qwen3-14B-abliterated           — highest quality, ~18 GB VRAM
@@ -3574,7 +3574,7 @@ SECONDARY_CHARACTER = ""  # @param {type:"string"}
 #  charcoal grey suit with no tie, confident posture, slight smile"
 
 # ── Decomposer Settings ──────────────────────────────────────────────────────
-SCRIPT_LLM_MODEL = "8B"  # @param ["8B", "3B", "14B"]
+SCRIPT_LLM_MODEL = "3B"  # @param ["8B", "3B", "14B"]
 # LLM model for script decomposition.
 
 AUTO_CAMERA_SELECT = True  # @param {type:"boolean"}
@@ -4103,23 +4103,23 @@ MULTI_FRAME_ANCHOR_COUNT = 3    # @param {type:"integer"}
 # Number of frames from previous segment used as conditioning anchor.
 # More frames = stronger temporal consistency but slightly slower.
 
-USE_CHARACTER_EMBEDDING_BANK = False  # @param {type:"boolean"}
+USE_CHARACTER_EMBEDDING_BANK = True  # @param {type:"boolean"}
 # Accumulate character features across segments for consistency.
 # Uses CharacterEmbeddingBank class to average features over time.
 
-USE_STYLE_LOCK = False   # @param {type:"boolean"}
+USE_STYLE_LOCK = True   # @param {type:"boolean"}
 # Lock visual style by averaging multiple anchor frame latents.
 # Creates a "style constraint" that prevents drift across segments.
 
-USE_MOTION_COHERENCE = False  # @param {type:"boolean"}
+USE_MOTION_COHERENCE = True  # @param {type:"boolean"}
 # Enable optical flow estimation between segments for smooth motion.
 # Auto-selects camera LoRA based on detected motion direction.
 
-USE_VELOCITY_INJECTION = False  # @param {type:"boolean"}
+USE_VELOCITY_INJECTION = True  # @param {type:"boolean"}
 # Inject velocity vector (frame[-2] - frame[-1]) into initial noise.
 # Maintains motion momentum between segments.
 
-USE_ADAPTIVE_OVERLAP = False  # @param {type:"boolean"}
+USE_ADAPTIVE_OVERLAP = True  # @param {type:"boolean"}
 # Replace fixed OVERLAP_FRAMES with adaptive computation.
 # High motion = fewer overlap frames, low motion = more overlap frames.
 
@@ -4247,7 +4247,7 @@ AUTO_INCREMENT_SEED = True  # @param {type:"boolean"}
 # ── Model filenames ───────────────────────────────────────────────────────────
 UNET_MODEL      = "ltx-2-19b-distilled_Q4_K_M.gguf"
 # Gemma: choose ONE matching your GPU (fp4 for Blackwell, fp8 for T4/A100)
-CLIP_NAME1      = "gemma_3_12B_it_fp8_scaled.safetensors"  # fp8 for T4 (use fp4 only on Blackwell)
+CLIP_NAME1      = "gemma_3_12B_it_fp4_mixed.safetensors"  # fp8 for T4 (use fp4 only on Blackwell)
 CLIP_NAME2      = "ltx-2-19b-embeddings_connector_distill_bf16.safetensors"
 VAE_VIDEO_MODEL = "LTX2_video_vae_bf16.safetensors"
 VAE_AUDIO_MODEL = "LTX2_audio_vae_bf16.safetensors"
@@ -4695,8 +4695,8 @@ def generate_pro(
                     device="default"), 0)
         except Exception as e:
             print(f"   ⚠️  fp4 CLIP failed ({type(e).__name__}: {e})")
-            print("      Trying fp8 fallback (gemma_3_12B_it_fp8_scaled.safetensors)...")
-            fp8 = "gemma_3_12B_it_fp8_scaled.safetensors"
+            print("      Trying fp8 fallback (gemma_3_12B_it_fp4_mixed.safetensors)...")
+            fp8 = "gemma_3_12B_it_fp4_mixed.safetensors"
             try:
                 clip_model = get_value_at_index(
                     clip_loader.load_clip(
@@ -6045,7 +6045,7 @@ SCENES = [
     },
 ]
 
-USE_STORYBOARD = False  # @param {type:"boolean"}
+USE_STORYBOARD = True  # @param {type:"boolean"}
 # Set True in Cell 9 to run all scenes instead of a single clip.
 
 
