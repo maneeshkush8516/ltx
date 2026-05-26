@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "P0 Critical fixes: (1) Add force_unload_all_models() + aggressive_cleanup('inter-segment') between each segment in generate_extended_video() for-loop, (2) Replace all imageio.mimsave codec='libx264' calls with a proper ffmpeg-based helper function for h264 quality output",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Fix #2 (UNet not freed between segments): In generate_extended_video() at line ~5787, after 'aggressive_cleanup(f\"segment {seg_num} done\")' (line 5788), add 'force_unload_all_models()' followed by 'aggressive_cleanup(\"inter-segment\")' to ensure full VRAM release between segments.",
     "Step 2 - Fix #4 (imageio stitching quality): Create a helper function 'save_frames_as_mp4(frames_np, output_path, fps=25, crf=19)' that: (a) writes frames via imageio.mimsave to a temp file, (b) re-encodes with ffmpeg using '-c:v libx264 -crf 19 -pix_fmt yuv420p -preset medium -movflags +faststart', (c) falls back to renaming the raw file on failure. Place this helper near the existing helper functions (around line 1880, near _load_audio_vae).",
@@ -21,5 +21,5 @@
     "python -c \"import ast; ast.parse(open('LTX_PRO.py').read()); print('OK')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 4 imageio.mimsave(codec='libx264') calls replaced with save_frames_as_mp4 helper. Inter-segment cleanup upgraded to force_unload_all_models() + aggressive_cleanup. AST parse validates successfully. python3 required (not python) for verification command."
 }
