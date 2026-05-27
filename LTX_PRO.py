@@ -4221,6 +4221,7 @@ def apply_preset():
     """Apply GENERATION_PRESET and RESOLUTION_PRESET to global variables."""
     global WIDTH, HEIGHT, FRAMES, LLM_MODEL, BYPASS_EASY_PROMPT
     global USE_TILED_VAE, USE_CHUNK_FF, USE_STORYBOARD, USE_SEGMENT_EXTENSION
+    global RESOLUTION_PRESET
 
     # Apply generation preset
     preset = _PRESET_DEFINITIONS.get(GENERATION_PRESET)
@@ -4232,6 +4233,8 @@ def apply_preset():
         BYPASS_EASY_PROMPT = preset["bypass_easy_prompt"]
         USE_TILED_VAE = preset["use_tiled_vae"]
         USE_CHUNK_FF = preset["use_chunk_ff"]
+        # Generation preset locks resolution - set to Custom to prevent override
+        RESOLUTION_PRESET = "Custom"
 
     # Apply resolution preset (overrides preset width/height unless Custom)
     res = _RESOLUTION_DEFINITIONS.get(RESOLUTION_PRESET)
@@ -5603,6 +5606,10 @@ USE_SCENE_CONTINUITY = True  # @param {type:"boolean"}
 # When True in run_storyboard(), the last frame of scene N becomes
 # the image_path seed for scene N+1 (seamless continuity).
 
+# Sync ENABLE_SCENE_CONTINUITY toggle (Cell 3.6) to this setting
+if not ENABLE_SCENE_CONTINUITY:
+    USE_SCENE_CONTINUITY = False
+
 print("✅ Configuration set.")
 print(f"   Resolution : {WIDTH}×{HEIGHT}  |  Frames : {FRAMES}  ({FRAMES/FPS:.1f}s @ {FPS}fps)")
 print(f"   UNet       : {UNET_MODEL}")
@@ -5906,6 +5913,8 @@ def generate_pro(
         _bypass = True  # Force bypass when LLM expansion is disabled
     if not ENABLE_VISION_ANALYSIS:
         _use_vision = False  # Force vision off when disabled
+    if not _enable_quality_checks:
+        _use_quality_gate = False  # Disable quality gate when quality checks are off
 
     # ── Apply VRAMManager optimal settings (unless user explicitly overrode) ──
     _vram_settings = _VRAM_MGR.get_optimal_settings()
@@ -6746,7 +6755,10 @@ def generate_pro(
         else:
             print("   [SKIPPED] Audio decode disabled via ENABLE_AUDIO_GENERATION=False")
 
-        del vae_audio
+        try:
+            del vae_audio
+        except NameError:
+            pass
         aggressive_cleanup("audio VAE done")
 
         # ── POST-PROCESSING: Color matching & grading (FEAT-003) ──────────

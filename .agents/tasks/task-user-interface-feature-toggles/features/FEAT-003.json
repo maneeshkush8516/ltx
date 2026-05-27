@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address review issues from 2025-01-15-100000-review.md: wire dead toggles (ENABLE_QUALITY_CHECKS, ENABLE_SCENE_CONTINUITY), fix resolution preset override in apply_preset(), and guard vae_audio deletion against NameError.",
+  "status": "in_progress",
+  "steps": [
+    "Wire _enable_quality_checks to the quality gate check in generate_pro() by adding `_use_quality_gate = _use_quality_gate and _enable_quality_checks` after the toggle resolution block",
+    "Add ENABLE_SCENE_CONTINUITY sync logic in Cell 3.6 (before summary print): if not ENABLE_SCENE_CONTINUITY, set USE_SCENE_CONTINUITY = False",
+    "Fix apply_preset() to set RESOLUTION_PRESET = 'Custom' after applying generation preset so that resolution preset does not silently override generation preset's width/height",
+    "Guard `del vae_audio` at line 6749 with a try/except NameError to prevent crash when audio loading was skipped"
+  ],
+  "acceptance_criteria": [
+    "python3 -m py_compile LTX_PRO.py passes without errors",
+    "ENABLE_QUALITY_CHECKS=False causes quality gate to be skipped",
+    "ENABLE_SCENE_CONTINUITY=False sets USE_SCENE_CONTINUITY=False before generate_pro() runs",
+    "apply_preset() with a generation preset does not have its resolution overridden by RESOLUTION_PRESET default",
+    "del vae_audio does not crash if vae_audio was never loaded"
+  ],
+  "verification": [
+    "python3 -m py_compile LTX_PRO.py"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}
