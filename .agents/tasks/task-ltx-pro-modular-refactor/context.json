@@ -1,0 +1,20 @@
+{
+  "project_type": "Google Colab notebook-style monolithic Python script for AI video generation (LTX-2 pipeline)",
+  "language": "Python 3.9+",
+  "build_system": "None (Colab notebook). Validation via py_compile and AST checks.",
+  "test_framework": "No test framework present. Validation is py_compile + import checks.",
+  "build_command": "python3 -m py_compile ltx_pro/__init__.py && python3 -c 'import ltx_pro'",
+  "test_command": "find ltx_pro -name '*.py' -exec python3 -m py_compile {} \\;",
+  "verification_instructions": "1. Run py_compile on every .py in ltx_pro/ to confirm valid syntax. 2. Run 'python3 -c \"import ltx_pro\"' to confirm the package is importable without runtime errors (some imports like torch/comfy will fail in sandbox - that is expected, use try/except guards). 3. Verify LTX_PRO.py itself passes py_compile.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - this is a pure refactor. Python 3.9 is available.",
+  "environment_constraints": "No CUDA/GPU available. No ComfyUI, torch, transformers, etc. installed. All modules MUST pass py_compile independently (syntax-valid). Runtime imports of heavy dependencies (torch, transformers, comfy, etc.) should be guarded with try/except or conditional imports for testing purposes. The actual runtime environment is Google Colab with full GPU.",
+  "contribution_requirements": "Preserve ALL existing functionality. Keep @param annotations in LTX_PRO.py. Each module must have __all__ exports and docstrings on all public classes/functions. No circular imports.",
+  "key_patterns": "1. ComfyUI node pattern: NODE_CLASS_MAPPINGS['NodeName']() -> node.FUNCTION() -> get_value_at_index(result, 0). 2. VRAM management: load model -> use -> del -> aggressive_cleanup(). 3. Config via module-level globals with @param annotations. 4. Feature toggles (ENABLE_*) gate functionality. 5. Functions use globals().get() for default values from notebook cells.",
+  "relevant_files": [
+    "LTX_PRO.py",
+    "LTX2EasyPromptLD.py",
+    "LTX2VisionEasyPromptLD.py"
+  ],
+  "directory_structure": "Root: /projects/sandbox/ltx/ contains LTX_PRO.py (8670 lines monolith), LTX2EasyPromptLD.py (ComfyUI node), LTX2VisionEasyPromptLD.py (ComfyUI node), JSON workflow files. Target: create ltx_pro/ package with 16 modules."
+}

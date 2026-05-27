@@ -1,0 +1,7 @@
+{
+  "task_id": "task-ltx-pro-modular-refactor",
+  "task_description": "Modularize LTX_PRO.py (8670 lines) into a proper Python package (ltx_pro/) with 16 modules, create a new StoryToVideo system for YouTube series production, and rewrite LTX_PRO.py as a thin ~500-800 line Colab orchestrator.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005", "FEAT-006"],
+  "blocked_reason": null
+}

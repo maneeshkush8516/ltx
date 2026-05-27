@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-006",
+  "type": "refactor",
+  "description": "Rewrite LTX_PRO.py as a thin orchestrator notebook that imports from the ltx_pro/ package. Keep all @param annotations, cell markers, and Colab-specific code, but replace inline implementations with imports from the package modules.",
+  "status": "in_progress",
+  "steps": [
+    "Rewrite LTX_PRO.py to approximately 500-800 lines. Keep the file structure: Cell 0 (header/docstring), Cell 1 (environment setup - keep as-is with commented shell commands), Cell 2 (model downloads - keep model_download function and download logic as-is since it uses Colab shell), Cell 3 (imports from ltx_pro package + global instance creation), Cell 3.5 (Quick Setup Dashboard - keep @param annotations, call config functions from ltx_pro.config), Cell 3.6 (Feature Toggles - keep @param annotations, use config module), Cell 4 (Easy Prompt + Vision settings with @param), Cell 4.5 (Script decomposer settings with @param, use ltx_pro.storyboard), Cell 5 (Character & LoRA config with @param), Cell 6 (Video generation config with @param), Cell 7 (import generate_pro, generate_extended_video, generate_infinite_flow from ltx_pro), Cell 8 (import run_storyboard from ltx_pro, keep SCENES definition), Cell 9 (Run - keep orchestration logic), Cell 9.5 (Merge - import from ltx_pro.export), Cell 10 (Export - import from ltx_pro.export), Cell 11 (Usage instructions - keep as comments/markdown).",
+    "Cell 3 becomes the import hub: 'from ltx_pro.config import *', 'from ltx_pro.vram import VRAMManager, cleanup_memory, aggressive_cleanup, _VRAM_MGR', 'from ltx_pro.pipeline import generate_pro', 'from ltx_pro.extended import generate_extended_video, generate_infinite_flow, FlowState, InfiniteFlowConfig', 'from ltx_pro.storyboard import run_storyboard, decompose_script_to_scenes, print_scene_breakdown', 'from ltx_pro.story_to_video import StoryToVideo', 'from ltx_pro.character import PersistentLatentSeed, CharacterPromptAnchor, CharacterFeatureExtractor, CharacterEmbeddingBank', 'from ltx_pro.lora import _build_lora_stack, apply_lora_stack', 'from ltx_pro.overlap import blend_overlap_frames, extract_anchor_frame, compute_segment_seeds', 'from ltx_pro.export import merge_clips_to_video, auto_find_output_clips, concatenate_clips', 'from ltx_pro.prompt_architect import InlinePromptArchitect, run_easy_prompt', 'from ltx_pro.vision_describe import InlineVisionDescribe, run_vision_describe', etc.",
+    "Keep ALL @param annotations exactly as they are (Colab requirement). The @param cells define the global variables that the imported functions read via globals().get().",
+    "Keep the 'from nodes import NODE_CLASS_MAPPINGS' pattern - this is needed at runtime in the Colab/ComfyUI environment.",
+    "Preserve the error handling in Cell 9 (KeyboardInterrupt, FileNotFoundError, OOM, RuntimeError catch blocks with helpful messages).",
+    "Ensure the file passes python3 -m py_compile (the file must be valid Python syntax even though runtime imports like 'from nodes import' will fail outside ComfyUI).",
+    "Run verification: python3 -m py_compile LTX_PRO.py"
+  ],
+  "acceptance_criteria": [
+    "LTX_PRO.py is approximately 500-800 lines (reduced from 8670)",
+    "All @param annotations are preserved in the correct cells",
+    "All cell markers (# @title, # CELL N) are preserved",
+    "All imports from ltx_pro/ package are present and correct",
+    "The orchestration logic in Cells 9, 9.5, 10 is preserved",
+    "SCENES list definition is preserved in Cell 8",
+    "File passes python3 -m py_compile",
+    "The from nodes import NODE_CLASS_MAPPINGS pattern is preserved"
+  ],
+  "verification": [
+    "python3 -m py_compile LTX_PRO.py",
+    "python3 -c \"content = open('LTX_PRO.py').read(); lines = content.split('\\n'); assert len(lines) < 900, f'Too many lines: {len(lines)}'; assert '@param' in content, 'Missing @param annotations'; assert 'from ltx_pro' in content, 'Missing package imports'\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
