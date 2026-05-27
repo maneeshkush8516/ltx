@@ -208,8 +208,6 @@ RESOLUTION_PRESET = "Landscape 16:9"  # @param ["Portrait 9:16", "Landscape 16:9
 GENERATION_MODE = "Single Clip"  # @param ["Single Clip", "Storyboard", "Infinite Flow"]
 DIFFICULTY_LEVEL = "Intermediate"  # @param ["Beginner", "Intermediate", "Expert"]
 
-apply_preset()
-_config_valid = validate_config()
 print_current_config()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -410,6 +408,10 @@ GDRIVE_PATH = "/content/drive/MyDrive/LTX_PRO_Output"  # @param {type:"string"}
 EXPORT_TIMELINE = False     # @param {type:"boolean"}
 TIMELINE_FORMAT = "json"    # @param ["json", "edl"]
 USE_PARALLEL_PROMPT_EXPANSION = False  # @param {type:"boolean"}
+
+# Apply preset AFTER all @param declarations so preset values are not overwritten
+apply_preset()
+_config_valid = validate_config()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CELL 7  ─  DEFINE generate_pro()

@@ -17,6 +17,8 @@ from typing import Optional, List, Dict, Any, TYPE_CHECKING
 if TYPE_CHECKING:
     import torch
 
+from ltx_pro.config import *  # noqa: F401,F403 - populate module globals for globals().get()
+
 __all__ = [
     "FlowState",
     "InfiniteFlowConfig",

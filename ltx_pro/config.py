@@ -88,6 +88,70 @@ __all__ = [
     "ENABLE_SEGMENT_EXTENSION",
     # Quality keywords
     "STORY_QUALITY_KEYWORDS",
+    # Vision settings
+    "USE_VISION",
+    "VISION_MODEL",
+    # Display / download
+    "SHOW_PREVIEWS",
+    "DOWNLOAD_AFTER_GENERATE",
+    # Character settings
+    "CHARACTER_IMAGE_PATH",
+    "CHARACTER_STRENGTH",
+    "CHARACTER_CONSISTENCY_MODE",
+    "CHARACTER_NAME",
+    "CHARACTER_DESCRIPTION",
+    "CHARACTER_EXTRACTED_PROFILE",
+    # LoRA stack
+    "LORA_STACK",
+    "LORA_STACK_JSON",
+    "IC_LORA",
+    "IC_LORA_STRENGTH",
+    "CAMERA_LORA_STRENGTH",
+    # Color / Quality gates
+    "COLOR_GRADE",
+    "USE_COLOR_MATCHING",
+    "USE_QUALITY_GATE",
+    "QUALITY_GATE_MAX_RETRIES",
+    "USE_MULTI_RESOLUTION",
+    # Export / Drive
+    "EXPORT_TIMELINE",
+    "TIMELINE_FORMAT",
+    "PERSIST_TO_GDRIVE",
+    "GDRIVE_PATH",
+    "GENERATE_THUMBNAILS",
+    "THUMBNAIL_COLS",
+    # Audio sync
+    "USE_AUDIO_SYNC",
+    "AUDIO_SYNC_PATH",
+    "AUDIO_BPM",
+    # Advanced segment features
+    "USE_CHARACTER_EMBEDDING_BANK",
+    "USE_PERSISTENT_CONTEXT",
+    "USE_IDENTITY_REINFORCEMENT",
+    "USE_ADAPTIVE_OVERLAP",
+    "ADAPTIVE_OVERLAP_MIN",
+    "ADAPTIVE_OVERLAP_MAX",
+    "USE_MOTION_COHERENCE",
+    "USE_VELOCITY_INJECTION",
+    # Storyboard advanced
+    "USE_DUAL_ANCHOR_STORYBOARD",
+    "ANCHOR_BLEND_FRAMES",
+    "LATENT_OVERLAP_STRENGTH",
+    "OVERLAP_FRAMES_CHARACTER",
+    "USE_PARALLEL_PROMPT_EXPANSION",
+    "CONTINUITY_MULTI_FRAME_COUNT",
+    "CONTINUITY_COMPOSITE_MODE",
+    "CONTINUITY_FRAME_FORMAT",
+    # Script decomposer
+    "AUTO_CAMERA_SELECT",
+    "CUSTOM_LANGUAGE",
+    "SEGMENT_DURATION",
+    "VIDEO_QUALITY",
+    "VIDEO_STYLE",
+    "VIDEO_LANGUAGE",
+    "CHARACTER_DEFINITION",
+    "SECONDARY_CHARACTER",
+    "TARGET_VIDEO_DURATION",
     # Functions
     "apply_preset",
     "print_current_config",
@@ -280,6 +344,110 @@ OVERLAP_SIDE = "source"
 # ══════════════════════════════════════════════════════════════════════════════
 
 OUTPUT_PREFIX = "LTX-2-PRO"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VISION SETTINGS
+# ══════════════════════════════════════════════════════════════════════════════
+
+USE_VISION = False
+VISION_MODEL = "3B-fast"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DISPLAY / DOWNLOAD
+# ══════════════════════════════════════════════════════════════════════════════
+
+SHOW_PREVIEWS = False
+DOWNLOAD_AFTER_GENERATE = False
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHARACTER SETTINGS
+# ══════════════════════════════════════════════════════════════════════════════
+
+CHARACTER_IMAGE_PATH = None
+CHARACTER_STRENGTH = 1.0
+CHARACTER_CONSISTENCY_MODE = "both"
+CHARACTER_NAME = "Character"
+CHARACTER_DESCRIPTION = ""
+CHARACTER_EXTRACTED_PROFILE = None
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LORA STACK
+# ══════════════════════════════════════════════════════════════════════════════
+
+LORA_STACK = []
+LORA_STACK_JSON = None
+IC_LORA = ""
+IC_LORA_STRENGTH = 0.5
+CAMERA_LORA_STRENGTH = 0.5
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COLOR / QUALITY GATES
+# ══════════════════════════════════════════════════════════════════════════════
+
+COLOR_GRADE = "none"
+USE_COLOR_MATCHING = False
+USE_QUALITY_GATE = False
+QUALITY_GATE_MAX_RETRIES = 3
+USE_MULTI_RESOLUTION = False
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPORT / GOOGLE DRIVE
+# ══════════════════════════════════════════════════════════════════════════════
+
+EXPORT_TIMELINE = False
+TIMELINE_FORMAT = "json"
+PERSIST_TO_GDRIVE = False
+GDRIVE_PATH = ""
+GENERATE_THUMBNAILS = False
+THUMBNAIL_COLS = 4
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUDIO SYNC
+# ══════════════════════════════════════════════════════════════════════════════
+
+USE_AUDIO_SYNC = False
+AUDIO_SYNC_PATH = ""
+AUDIO_BPM = 120
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADVANCED SEGMENT FEATURES
+# ══════════════════════════════════════════════════════════════════════════════
+
+USE_CHARACTER_EMBEDDING_BANK = False
+USE_PERSISTENT_CONTEXT = False
+USE_IDENTITY_REINFORCEMENT = False
+USE_ADAPTIVE_OVERLAP = False
+ADAPTIVE_OVERLAP_MIN = 3
+ADAPTIVE_OVERLAP_MAX = 12
+USE_MOTION_COHERENCE = False
+USE_VELOCITY_INJECTION = False
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STORYBOARD ADVANCED
+# ══════════════════════════════════════════════════════════════════════════════
+
+USE_DUAL_ANCHOR_STORYBOARD = False
+ANCHOR_BLEND_FRAMES = 8
+LATENT_OVERLAP_STRENGTH = 0.5
+OVERLAP_FRAMES_CHARACTER = 8
+USE_PARALLEL_PROMPT_EXPANSION = False
+CONTINUITY_MULTI_FRAME_COUNT = 1
+CONTINUITY_COMPOSITE_MODE = "last"
+CONTINUITY_FRAME_FORMAT = "png"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCRIPT DECOMPOSER
+# ══════════════════════════════════════════════════════════════════════════════
+
+AUTO_CAMERA_SELECT = True
+CUSTOM_LANGUAGE = ""
+SEGMENT_DURATION = 5
+VIDEO_QUALITY = "8K cinematic"
+VIDEO_STYLE = "realistic"
+VIDEO_LANGUAGE = "English"
+CHARACTER_DEFINITION = ""
+SECONDARY_CHARACTER = ""
+TARGET_VIDEO_DURATION = 30
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FEATURE TOGGLES (ENABLE_* flags)

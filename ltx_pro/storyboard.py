@@ -19,6 +19,8 @@ from collections import Counter
 if TYPE_CHECKING:
     import torch
 
+from ltx_pro.config import *  # noqa: F401,F403 - populate module globals for globals().get()
+
 __all__ = [
     "decompose_script_to_scenes",
     "print_scene_breakdown",
