@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-001",
+  "type": "refactor",
+  "description": "Create the ltx_pro/ package foundation modules: __init__.py, config.py, vram.py, utils.py. These are the leaf-level modules with no internal dependencies that everything else builds on.",
+  "status": "in_progress",
+  "steps": [
+    "Create ltx_pro/__init__.py with package version ('2.0.0'), __all__ exports listing all public module names, and lazy imports from submodules.",
+    "Create ltx_pro/config.py: Extract ALL configuration constants, preset definitions, resolution definitions, feature toggle defaults (ENABLE_* flags), _PRESET_DEFINITIONS, _RESOLUTION_DEFINITIONS, model filename defaults (UNET_MODEL, CLIP_NAME1, etc.), sampling defaults (PASS1_SIGMAS, etc.), quality keywords (STORY_QUALITY_KEYWORDS), and helper functions (apply_preset, print_current_config, validate_config, disable_all_extras, enable_recommended, show_help, estimate_generation_time, estimate_vram_usage, suggest_settings). Source: Lines 4141-4617 (Cells 3.5 and 3.6) plus the config constants from Cell 6 (lines 5522-5699). Include __all__ export list.",
+    "Create ltx_pro/vram.py: Extract VRAMManager class (lines 288-451), vram_guard decorator (lines 454-465), cleanup_memory() (line 2177), aggressive_cleanup() (line 2194), _deep_unload_model() (line 2217), force_unload_all_models() (line 2275), _print_vram() (line 2319), purge_vram() (line 2609), _verify_vram_clear() (line 5709). Create module-level _VRAM_MGR singleton. Include __all__ export list.",
+    "Create ltx_pro/utils.py: Extract utility functions: get_value_at_index() (line 2331), pil_to_tensor() (line 2338), tensor_to_pil() (line 2343), load_image_tensor() (line 2349), get_last_frame_tensor() (line 2355), display_video() (line 2505), save_video_from_components() (line 2516), save_metadata_sidecar() (line 2529), validate_model_files() (line 2541), upload_image() (line 2631), import_custom_nodes() (line 2160), install_apt_packages() (line 119), model_download() (line 160). Include __all__ export list.",
+    "Ensure all modules pass python3 -m py_compile. Heavy imports (torch, numpy, cv2, comfy, etc.) must be inside functions or guarded with try/except at module level so the files are at least syntax-valid even without those packages installed.",
+    "Run: find ltx_pro -name '*.py' -exec python3 -m py_compile {} \\; to verify all files compile cleanly."
+  ],
+  "acceptance_criteria": [
+    "ltx_pro/__init__.py exists with version string and __all__",
+    "ltx_pro/config.py contains all preset definitions, feature toggle defaults, and helper functions with __all__",
+    "ltx_pro/vram.py contains VRAMManager class, cleanup functions, and decorator with __all__",
+    "ltx_pro/utils.py contains all utility functions with __all__",
+    "All four files pass python3 -m py_compile without errors",
+    "Each module has docstrings on all public classes and functions"
+  ],
+  "verification": [
+    "python3 -m py_compile ltx_pro/__init__.py",
+    "python3 -m py_compile ltx_pro/config.py",
+    "python3 -m py_compile ltx_pro/vram.py",
+    "python3 -m py_compile ltx_pro/utils.py",
+    "python3 -c \"import ast; [ast.parse(open(f'ltx_pro/{m}.py').read()) for m in ['__init__','config','vram','utils']]\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
