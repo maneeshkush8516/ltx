@@ -1,0 +1,14 @@
+{
+  "task_id": "task-user-interface-feature-toggles",
+  "task_description": "Add user-friendly interface settings (Cell 3.5 - Quick Setup Dashboard with presets, resolution shortcuts, difficulty levels) and enable/disable feature toggles (Cell 3.6 - unified toggle panel for all major features) to LTX_PRO.py. Integrate these toggles into generate_pro() so they actually skip phases when disabled.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "python3 -m py_compile passes. All ENABLE_* toggles defined and wired. Review v2 verdict: APPROVED."
+  }
+}

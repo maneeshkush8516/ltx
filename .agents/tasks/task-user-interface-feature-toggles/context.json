@@ -1,0 +1,27 @@
+{
+  "project_type": "Google Colab notebook-style Python script for LTX-2 video generation",
+  "language": "Python",
+  "build_system": "py_compile for syntax validation; no build step (single-file script)",
+  "test_framework": "No test suite - validation is py_compile and manual Colab execution",
+  "build_command": "python3 -m py_compile LTX_PRO.py",
+  "test_command": "python3 -m py_compile LTX_PRO.py",
+  "verification_instructions": "1. Run py_compile to ensure valid Python syntax. 2. Verify all @param annotations are valid Colab form format. 3. Confirm print() outputs match existing style.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - single Python file",
+  "environment_constraints": "No external dependencies needed for validation. The file is designed for Google Colab but can be py_compiled anywhere. No pip install needed for static analysis.",
+  "contribution_requirements": "Keep @param annotations in Colab format. Use box-drawing section headers matching existing style. All code must pass py_compile.",
+  "key_patterns": [
+    "Section headers use: # followed by box-drawing chars and CELL N - TITLE",
+    "Configuration uses: VARIABLE = value  # @param {type:\"type\"}",
+    "Each cell ends with print() statements summarizing what was configured",
+    "VRAMManager singleton: _VRAM_MGR (defined around line 286, instantiated later)",
+    "Feature flags pattern: USE_X = True/False  # @param {type:\"boolean\"}",
+    "generate_pro() resolves overrides: _flag = param if param is not None else GLOBAL",
+    "Phase comments: # PHASE N - DESCRIPTION",
+    "Insertion point for new cells: after line 4135 (last print of Cell 3), before line 4138 (Cell 4 header)"
+  ],
+  "relevant_files": [
+    "LTX_PRO.py"
+  ],
+  "directory_structure": "Single file project: /projects/sandbox/ltx/LTX_PRO.py (8141 lines). Supporting JSON workflow files (LD-I2V.json, SVI-Pro-Workflow.json) for reference."
+}

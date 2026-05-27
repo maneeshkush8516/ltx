@@ -1,0 +1,21 @@
+{
+  "project_type": "Google Colab Python notebook script for AI video generation using LTX-2 model with ComfyUI nodes",
+  "language": "Python",
+  "build_system": "Google Colab with pip installs and ComfyUI custom nodes. No Makefile or standard build system.",
+  "test_framework": "No formal test framework. Validation is via AST syntax checking (python -m py_compile) and grep verification of expected patterns.",
+  "build_command": "python -m py_compile /projects/sandbox/ltx/LTX_PRO.py",
+  "test_command": "python -c \"import ast; ast.parse(open('/projects/sandbox/ltx/LTX_PRO.py').read()); print('AST OK')\"",
+  "verification_instructions": "1. Run python -m py_compile LTX_PRO.py to verify syntax. 2. Run AST parse to confirm no syntax errors. 3. Verify key classes/functions exist via grep.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - this is a standalone Python script meant for Google Colab execution.",
+  "environment_constraints": "INTEGRATIONS_ONLY network mode - cannot pip install, cannot download models, cannot run Docker. Use AST/syntax validation only. The script depends on ComfyUI, torch, transformers, etc. which are NOT available in this sandbox. Code changes must be validated structurally (AST parse, grep checks) not functionally.",
+  "contribution_requirements": "The script is a single monolithic .py file organized in numbered cells (Cell 0-11). All modifications must maintain cell structure, inline comments, and the @param annotations for Colab form fields. The script must remain syntactically valid Python.",
+  "key_patterns": "1. Global variables with @param annotations for Colab forms. 2. ComfyUI NODE_CLASS_MAPPINGS access pattern. 3. VRAMManager for GPU detection and optimization. 4. InlinePromptArchitect/InlineVisionDescribe as embedded fallbacks when ComfyUI nodes unavailable. 5. generate_pro() is the main two-pass generation function. 6. generate_extended_video()/generate_infinite_flow() for SVI-Pro style segment iteration. 7. run_storyboard() for multi-scene sequential generation. 8. blend_overlap_frames() for segment stitching. 9. PersistentLatentSeed + CharacterPromptAnchor for character consistency. 10. Content tier detection (explicit/sensual/neutral) for prompt expansion.",
+  "relevant_files": [
+    "/projects/sandbox/ltx/LTX_PRO.py",
+    "/projects/sandbox/ltx/LTX2EasyPromptLD.py",
+    "/projects/sandbox/ltx/LTX2VisionEasyPromptLD.py",
+    "/projects/sandbox/ltx/SVI-Pro-Workflow.json"
+  ],
+  "directory_structure": "Single directory /projects/sandbox/ltx/ containing: LTX_PRO.py (main 7079-line script), LTX2EasyPromptLD.py (ComfyUI prompt expansion node, 1065 lines), LTX2VisionEasyPromptLD.py (ComfyUI vision description node, 190 lines), SVI-Pro-Workflow.json (ComfyUI workflow for Wan2.2 with SVI Pro), LD-I2V.json (LTX-2 I2V workflow)"
+}
