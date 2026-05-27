@@ -1,0 +1,40 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add Cell 3.5 (Quick Setup Dashboard) and Cell 3.6 (Feature Toggles) as new sections between Cell 3 (line 4135) and Cell 4 (line 4138) in LTX_PRO.py. These provide a user-friendly interface with presets, resolution shortcuts, difficulty levels, and unified enable/disable toggles for all major features.",
+  "status": "in_progress",
+  "steps": [
+    "Insert new Cell 3.5 section after line 4135 (after the line: print(\"   \\u2713 mount_google_drive()      \\u2014 Drive persistence helpers\")) with section header matching existing style: # \\u2550\\u2550\\u2550...\\n# CELL 3.5  \\u2500  QUICK SETUP DASHBOARD\\n# \\u2550\\u2550\\u2550...",
+    "In Cell 3.5, add a PRESET system: GENERATION_PRESET = 'Standard' # @param [\"Quick Draft\", \"Standard\", \"Cinema Quality\", \"T4 Safe\"] with a dict mapping each preset to optimal values (resolution, frames, LLM model, sampling settings, tiled VAE, etc.)",
+    "In Cell 3.5, add RESOLUTION_PRESET = 'Landscape 16:9' # @param [\"Portrait 9:16\", \"Landscape 16:9\", \"Square 1:1\", \"Widescreen 21:9\", \"Custom\"] with a dict mapping each to (width, height) tuples",
+    "In Cell 3.5, add GENERATION_MODE = 'Single Clip' # @param [\"Single Clip\", \"Storyboard\", \"Infinite Flow\"] that sets USE_STORYBOARD and USE_SEGMENT_EXTENSION accordingly",
+    "In Cell 3.5, add DIFFICULTY_LEVEL = 'Intermediate' # @param [\"Beginner\", \"Intermediate\", \"Expert\"] with logic that prints which settings are active/hidden per level",
+    "In Cell 3.5, add a print_current_config() function that displays all active settings in a formatted table using print() statements with box-drawing characters",
+    "In Cell 3.5, add a validate_config() function that checks for conflicts (e.g., T4 GPU with Cinema preset, incompatible resolution+frames combos, segment extension without enough VRAM) and prints warnings",
+    "In Cell 3.5, add an apply_preset() function that applies the selected GENERATION_PRESET by setting global variables, and call it at the end of the cell",
+    "Insert new Cell 3.6 section after Cell 3.5 with header: # CELL 3.6  \\u2500  FEATURE TOGGLES",
+    "In Cell 3.6, add all ENABLE_* toggle variables with @param {type:\"boolean\"} annotations: ENABLE_VIDEO_GENERATION, ENABLE_UPSCALING, ENABLE_AUDIO_GENERATION, ENABLE_CHARACTER_SYSTEM, ENABLE_POST_PROCESSING, ENABLE_QUALITY_CHECKS, ENABLE_LLM_PROMPT_EXPANSION, ENABLE_VISION_ANALYSIS, ENABLE_SCENE_CONTINUITY, ENABLE_SEGMENT_EXTENSION",
+    "In Cell 3.6, add disable_all_extras() function that sets all ENABLE_* toggles to False except ENABLE_VIDEO_GENERATION",
+    "In Cell 3.6, add enable_recommended() function that reads _VRAM_MGR to detect GPU and enables appropriate features (fewer for T4, more for A100)",
+    "In Cell 3.6, add the Interactive Helper Functions: show_help(topic), estimate_generation_time(), estimate_vram_usage(), suggest_settings(goal)",
+    "End both Cell 3.5 and Cell 3.6 with summary print() statements showing what's enabled/disabled, matching existing style",
+    "Update the CELL ORDER docstring at the top of the file (around line 28) to include Cell 3.5 and Cell 3.6"
+  ],
+  "acceptance_criteria": [
+    "python3 -m py_compile LTX_PRO.py passes without errors",
+    "All new variables use @param {type:\"..\"} Colab annotation format",
+    "Section headers use box-drawing characters matching existing Cell headers",
+    "print_current_config() produces a readable formatted table",
+    "validate_config() detects at least 3 types of conflicts and prints warnings",
+    "GENERATION_PRESET with all 4 options maps to concrete settings",
+    "All 10 ENABLE_* toggles are defined with sensible defaults",
+    "disable_all_extras() and enable_recommended() modify the correct globals",
+    "estimate_generation_time() returns a time estimate based on resolution and frames",
+    "estimate_vram_usage() returns a VRAM estimate based on current settings"
+  ],
+  "verification": [
+    "python3 -m py_compile LTX_PRO.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

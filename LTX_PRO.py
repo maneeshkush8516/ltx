@@ -29,6 +29,8 @@ GPU REQUIREMENTS:
 #   Cell 2  - Model downloads
 #   Cell 3  - Imports, helpers, VRAMManager, InlinePromptArchitect,
 #             InlineVisionDescribe, character system
+#   Cell 3.5 - Quick Setup Dashboard (presets, resolution, mode, difficulty)
+#   Cell 3.6 - Feature Toggles (enable/disable major subsystems)
 #   Cell 4  - Easy Prompt + Vision settings
 #   Cell 4.5 - Script-to-Shot Decomposer
 #   Cell 5  - Character Consistency & LoRA config
@@ -4133,6 +4135,482 @@ print("   ✓ SVIProContext             — persistent model context manager")
 print("   ✓ apply_color_grade()       — color grading presets")
 print("   ✓ detect_beats()            — audio sync helpers")
 print("   ✓ mount_google_drive()      — Drive persistence helpers")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CELL 3.5  ─  QUICK SETUP DASHBOARD
+# ══════════════════════════════════════════════════════════════════════════════
+
+# @title  { "single-column": true }
+# @markdown ## 💥 3.5. Quick Setup Dashboard
+# @markdown Select a preset to auto-configure resolution, frame count, LLM model,
+# @markdown and performance settings for your GPU tier.
+
+# ── Generation Preset ─────────────────────────────────────────────────────────
+GENERATION_PRESET = "Standard"  # @param ["Quick Draft", "Standard", "Cinema Quality", "T4 Safe"]
+# "Quick Draft"    → 512x512, 41 frames, 3B LLM, bypass prompt, tiled VAE
+# "Standard"       → 768x512, 121 frames, 3B LLM, no bypass
+# "Cinema Quality" → 1024x576, 161 frames, 8B LLM, pro mode
+# "T4 Safe"        → 768x512, 97 frames, 3B LLM, tiled VAE, chunk FF, fp8 CLIP
+
+_PRESET_DEFINITIONS = {
+    "Quick Draft": {
+        "width": 512,
+        "height": 512,
+        "frames": 41,
+        "llm_model": "3B",
+        "bypass_easy_prompt": True,
+        "use_tiled_vae": True,
+        "use_chunk_ff": False,
+    },
+    "Standard": {
+        "width": 768,
+        "height": 512,
+        "frames": 121,
+        "llm_model": "3B",
+        "bypass_easy_prompt": False,
+        "use_tiled_vae": False,
+        "use_chunk_ff": False,
+    },
+    "Cinema Quality": {
+        "width": 1024,
+        "height": 576,
+        "frames": 161,
+        "llm_model": "8B",
+        "bypass_easy_prompt": False,
+        "use_tiled_vae": False,
+        "use_chunk_ff": False,
+    },
+    "T4 Safe": {
+        "width": 768,
+        "height": 512,
+        "frames": 97,
+        "llm_model": "3B",
+        "bypass_easy_prompt": False,
+        "use_tiled_vae": True,
+        "use_chunk_ff": True,
+    },
+}
+
+# ── Resolution Preset ─────────────────────────────────────────────────────────
+RESOLUTION_PRESET = "Landscape 16:9"  # @param ["Portrait 9:16", "Landscape 16:9", "Square 1:1", "Widescreen 21:9", "Custom"]
+# Overrides WIDTH/HEIGHT unless "Custom" is selected.
+
+_RESOLUTION_DEFINITIONS = {
+    "Portrait 9:16": (576, 1024),
+    "Landscape 16:9": (768, 512),
+    "Square 1:1": (512, 512),
+    "Widescreen 21:9": (896, 384),
+    "Custom": None,  # Keep user-specified WIDTH/HEIGHT
+}
+
+# ── Generation Mode ───────────────────────────────────────────────────────────
+GENERATION_MODE = "Single Clip"  # @param ["Single Clip", "Storyboard", "Infinite Flow"]
+# "Single Clip"    → One-shot generation (USE_STORYBOARD=False, USE_SEGMENT_EXTENSION=False)
+# "Storyboard"     → Multi-scene storyboard (USE_STORYBOARD=True)
+# "Infinite Flow"  → Extended video via segment stitching (USE_SEGMENT_EXTENSION=True)
+
+# ── Difficulty Level ──────────────────────────────────────────────────────────
+DIFFICULTY_LEVEL = "Intermediate"  # @param ["Beginner", "Intermediate", "Expert"]
+# "Beginner"       → Only essential settings visible; presets handle the rest
+# "Intermediate"   → Resolution, frames, LLM model, and common toggles visible
+# "Expert"         → All settings exposed including advanced VRAM, sampling, LoRA
+
+
+def apply_preset():
+    """Apply GENERATION_PRESET and RESOLUTION_PRESET to global variables."""
+    global WIDTH, HEIGHT, FRAMES, LLM_MODEL, BYPASS_EASY_PROMPT
+    global USE_TILED_VAE, USE_CHUNK_FF, USE_STORYBOARD, USE_SEGMENT_EXTENSION
+
+    # Apply generation preset
+    preset = _PRESET_DEFINITIONS.get(GENERATION_PRESET)
+    if preset:
+        WIDTH = preset["width"]
+        HEIGHT = preset["height"]
+        FRAMES = preset["frames"]
+        LLM_MODEL = preset["llm_model"]
+        BYPASS_EASY_PROMPT = preset["bypass_easy_prompt"]
+        USE_TILED_VAE = preset["use_tiled_vae"]
+        USE_CHUNK_FF = preset["use_chunk_ff"]
+
+    # Apply resolution preset (overrides preset width/height unless Custom)
+    res = _RESOLUTION_DEFINITIONS.get(RESOLUTION_PRESET)
+    if res is not None:
+        WIDTH, HEIGHT = res
+
+    # Apply generation mode
+    if GENERATION_MODE == "Single Clip":
+        USE_STORYBOARD = False
+        USE_SEGMENT_EXTENSION = False
+    elif GENERATION_MODE == "Storyboard":
+        USE_STORYBOARD = True
+        USE_SEGMENT_EXTENSION = False
+    elif GENERATION_MODE == "Infinite Flow":
+        USE_STORYBOARD = False
+        USE_SEGMENT_EXTENSION = True
+
+
+def print_current_config():
+    """Display all key settings in a formatted table."""
+    print("  ┌────────────────────────────────────────────────────────────┐")
+    print("  │              CURRENT CONFIGURATION                         │")
+    print("  ├────────────────────────────────────────────────────────────┤")
+    print(f"  │  Preset          : {GENERATION_PRESET:<38} │")
+    print(f"  │  Resolution      : {WIDTH}x{HEIGHT} ({RESOLUTION_PRESET}){' ' * max(0, 24 - len(f'{WIDTH}x{HEIGHT} ({RESOLUTION_PRESET})'))}│")
+    print(f"  │  Frames          : {FRAMES:<38} │")
+    print(f"  │  LLM Model       : {LLM_MODEL:<38} │")
+    print(f"  │  Generation Mode : {GENERATION_MODE:<38} │")
+    print(f"  │  Difficulty       : {DIFFICULTY_LEVEL:<37} │")
+    print("  ├────────────────────────────────────────────────────────────┤")
+    print(f"  │  Tiled VAE       : {'ON' if USE_TILED_VAE else 'OFF':<38} │")
+    print(f"  │  Chunk FF        : {'ON' if USE_CHUNK_FF else 'OFF':<38} │")
+    print(f"  │  Bypass Prompt   : {'ON' if BYPASS_EASY_PROMPT else 'OFF':<38} │")
+    print("  └────────────────────────────────────────────────────────────┘")
+
+
+def validate_config():
+    """Check for configuration conflicts and print warnings.
+
+    Returns True if config is valid, prints warnings and returns False otherwise.
+    """
+    warnings_found = []
+
+    # Check T4 GPU with Cinema preset
+    if _VRAM_MGR.is_t4 and GENERATION_PRESET == "Cinema Quality":
+        warnings_found.append(
+            "  ⚠ T4 GPU detected with 'Cinema Quality' preset - VRAM may be insufficient. "
+            "Consider 'T4 Safe' or 'Standard' preset."
+        )
+
+    # Check high resolution + many frames
+    pixel_count = WIDTH * HEIGHT * FRAMES
+    if pixel_count > 768 * 512 * 161 and _VRAM_MGR.is_low_vram:
+        warnings_found.append(
+            f"  ⚠ High resolution ({WIDTH}x{HEIGHT}) + {FRAMES} frames may exceed available VRAM. "
+            "Consider reducing resolution or frame count."
+        )
+
+    # Check segment extension with very high frame count
+    if USE_SEGMENT_EXTENSION and FRAMES > 200:
+        warnings_found.append(
+            f"  ⚠ Segment extension with {FRAMES} frames may produce very long generation times. "
+            "Consider FRAMES <= 161 for segment mode."
+        )
+
+    # Check incompatible CLIP precision for detected GPU
+    if _VRAM_MGR.is_t4 and LLM_MODEL == "14B":
+        warnings_found.append(
+            "  ⚠ 14B LLM model requires ~18 GB VRAM - incompatible with T4 GPU. "
+            "Use 3B or 8B model instead."
+        )
+
+    if warnings_found:
+        print("  ┌─── CONFIGURATION WARNINGS ────────────────────────────────┐")
+        for w in warnings_found:
+            print(f"  │ {w}")
+        print("  └────────────────────────────────────────────────────────────┘")
+        return False
+
+    return True
+
+
+# ── Apply preset on cell execution ────────────────────────────────────────────
+apply_preset()
+_config_valid = validate_config()
+print_current_config()
+
+print()
+print("  ── Cell 3.5 Summary ──────────────────────────────────────────────")
+print(f"   ✓ Preset applied: {GENERATION_PRESET}")
+print(f"   ✓ Resolution: {WIDTH}x{HEIGHT} ({RESOLUTION_PRESET})")
+print(f"   ✓ Frames: {FRAMES} | LLM: {LLM_MODEL} | Mode: {GENERATION_MODE}")
+print(f"   ✓ Config valid: {'Yes' if _config_valid else 'Warnings found (see above)'}")
+print(f"   ✓ Difficulty: {DIFFICULTY_LEVEL}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CELL 3.6  ─  FEATURE TOGGLES
+# ══════════════════════════════════════════════════════════════════════════════
+
+# @title  { "single-column": true }
+# @markdown ## 💥 3.6. Feature Toggles
+# @markdown Enable or disable major subsystems. Disabling unused features
+# @markdown reduces VRAM usage and speeds up generation.
+
+# ── Master Toggles ────────────────────────────────────────────────────────────
+ENABLE_VIDEO_GENERATION    = True   # @param {type:"boolean"}
+# Master switch - if False, skips all video generation entirely
+
+ENABLE_UPSCALING           = True   # @param {type:"boolean"}
+# Post-generation upscaling pass
+
+ENABLE_AUDIO_GENERATION    = True   # @param {type:"boolean"}
+# Generate audio/music track for the output video
+
+ENABLE_CHARACTER_SYSTEM    = True   # @param {type:"boolean"}
+# Multi-frame character anchoring and embedding bank
+
+ENABLE_POST_PROCESSING     = True   # @param {type:"boolean"}
+# Color grading, stabilization, and final export filters
+
+ENABLE_QUALITY_CHECKS      = True   # @param {type:"boolean"}
+# Maps to USE_QUALITY_GATE - auto-reject low-quality segments
+
+ENABLE_LLM_PROMPT_EXPANSION = True  # @param {type:"boolean"}
+# Inverse of BYPASS_EASY_PROMPT - when True, LLM expands prompts
+
+ENABLE_VISION_ANALYSIS     = True   # @param {type:"boolean"}
+# Maps to USE_VISION - analyse input images for scene context
+
+ENABLE_SCENE_CONTINUITY    = True   # @param {type:"boolean"}
+# Maps to USE_SCENE_CONTINUITY - last frame seeds next scene
+
+ENABLE_SEGMENT_EXTENSION   = False  # @param {type:"boolean"}
+# Maps to USE_SEGMENT_EXTENSION - extended video via stitching
+
+
+def disable_all_extras():
+    """Disable all feature toggles except the master video generation switch."""
+    global ENABLE_VIDEO_GENERATION, ENABLE_UPSCALING, ENABLE_AUDIO_GENERATION
+    global ENABLE_CHARACTER_SYSTEM, ENABLE_POST_PROCESSING, ENABLE_QUALITY_CHECKS
+    global ENABLE_LLM_PROMPT_EXPANSION, ENABLE_VISION_ANALYSIS
+    global ENABLE_SCENE_CONTINUITY, ENABLE_SEGMENT_EXTENSION
+
+    ENABLE_VIDEO_GENERATION = True
+    ENABLE_UPSCALING = False
+    ENABLE_AUDIO_GENERATION = False
+    ENABLE_CHARACTER_SYSTEM = False
+    ENABLE_POST_PROCESSING = False
+    ENABLE_QUALITY_CHECKS = False
+    ENABLE_LLM_PROMPT_EXPANSION = False
+    ENABLE_VISION_ANALYSIS = False
+    ENABLE_SCENE_CONTINUITY = False
+    ENABLE_SEGMENT_EXTENSION = False
+
+
+def enable_recommended():
+    """Enable features appropriate for the detected GPU using _VRAM_MGR."""
+    global ENABLE_VIDEO_GENERATION, ENABLE_UPSCALING, ENABLE_AUDIO_GENERATION
+    global ENABLE_CHARACTER_SYSTEM, ENABLE_POST_PROCESSING, ENABLE_QUALITY_CHECKS
+    global ENABLE_LLM_PROMPT_EXPANSION, ENABLE_VISION_ANALYSIS
+    global ENABLE_SCENE_CONTINUITY, ENABLE_SEGMENT_EXTENSION
+
+    ENABLE_VIDEO_GENERATION = True
+    ENABLE_SCENE_CONTINUITY = True
+    ENABLE_LLM_PROMPT_EXPANSION = True
+
+    if _VRAM_MGR.is_t4:
+        # T4: minimal extras to stay within 16 GB
+        ENABLE_UPSCALING = False
+        ENABLE_AUDIO_GENERATION = False
+        ENABLE_CHARACTER_SYSTEM = False
+        ENABLE_POST_PROCESSING = False
+        ENABLE_QUALITY_CHECKS = False
+        ENABLE_VISION_ANALYSIS = False
+        ENABLE_SEGMENT_EXTENSION = False
+    elif _VRAM_MGR.is_low_vram:
+        # L4 / 24 GB: moderate extras
+        ENABLE_UPSCALING = True
+        ENABLE_AUDIO_GENERATION = True
+        ENABLE_CHARACTER_SYSTEM = True
+        ENABLE_POST_PROCESSING = True
+        ENABLE_QUALITY_CHECKS = False
+        ENABLE_VISION_ANALYSIS = True
+        ENABLE_SEGMENT_EXTENSION = False
+    else:
+        # A100+ / 40 GB+: enable everything
+        ENABLE_UPSCALING = True
+        ENABLE_AUDIO_GENERATION = True
+        ENABLE_CHARACTER_SYSTEM = True
+        ENABLE_POST_PROCESSING = True
+        ENABLE_QUALITY_CHECKS = True
+        ENABLE_VISION_ANALYSIS = True
+        ENABLE_SEGMENT_EXTENSION = True
+
+
+def show_help(topic):
+    """Print guidance for a given topic.
+
+    Supported topics: presets, resolution, character, quality, performance
+    """
+    _help_topics = {
+        "presets": (
+            "  PRESETS\n"
+            "  -------\n"
+            "  Quick Draft   : Fastest output, low resolution, good for testing prompts.\n"
+            "  Standard      : Balanced quality/speed, works on most GPUs.\n"
+            "  Cinema Quality: Highest quality, requires L4/A100 (24+ GB VRAM).\n"
+            "  T4 Safe       : Optimized for T4 GPUs (16 GB), enables memory savers."
+        ),
+        "resolution": (
+            "  RESOLUTION\n"
+            "  ----------\n"
+            "  Portrait 9:16  : 576x1024 - vertical video (mobile, TikTok)\n"
+            "  Landscape 16:9 : 768x512  - horizontal (YouTube, standard)\n"
+            "  Square 1:1     : 512x512  - social media posts\n"
+            "  Widescreen 21:9: 896x384  - cinematic ultrawide\n"
+            "  Custom         : Use WIDTH/HEIGHT from Cell 6 directly"
+        ),
+        "character": (
+            "  CHARACTER SYSTEM\n"
+            "  ----------------\n"
+            "  Maintains character consistency across scenes using multi-frame\n"
+            "  anchor extraction and an embedding bank. Enable for storyboard\n"
+            "  mode or multi-scene narratives. Adds ~2 GB VRAM overhead."
+        ),
+        "quality": (
+            "  QUALITY CHECKS\n"
+            "  ---------------\n"
+            "  When enabled, each generated segment is scored for motion coherence,\n"
+            "  artifact density, and color consistency. Segments below threshold\n"
+            "  are regenerated with seed+1 (up to max retries)."
+        ),
+        "performance": (
+            "  PERFORMANCE TIPS\n"
+            "  -----------------\n"
+            "  - Enable Tiled VAE and Chunk FF on T4 GPUs\n"
+            "  - Use 3B LLM model for fastest prompt expansion\n"
+            "  - Reduce FRAMES to 41-97 for quick previews\n"
+            "  - Disable unused features with disable_all_extras()\n"
+            "  - Use 'T4 Safe' preset for memory-constrained environments"
+        ),
+    }
+    topic_lower = topic.lower().strip()
+    if topic_lower in _help_topics:
+        print(_help_topics[topic_lower])
+    else:
+        print(f"  Unknown topic: '{topic}'. Available: {', '.join(_help_topics.keys())}")
+
+
+def estimate_generation_time():
+    """Estimate generation time in seconds based on current settings and GPU.
+
+    Returns estimated seconds as a float.
+    """
+    # Base time per frame at 768x512 on A100 (approx 0.8s/frame)
+    base_time_per_frame = 0.8
+
+    # Scale by resolution relative to baseline (768x512 = 393216 pixels)
+    pixel_ratio = (WIDTH * HEIGHT) / 393216.0
+
+    # GPU speed multiplier
+    if _VRAM_MGR.is_t4:
+        gpu_multiplier = 3.0  # T4 is roughly 3x slower
+    elif _VRAM_MGR.is_low_vram:
+        gpu_multiplier = 1.5  # L4 is roughly 1.5x slower
+    else:
+        gpu_multiplier = 1.0  # A100 baseline
+
+    # LLM overhead (one-time)
+    llm_overhead = {"3B": 5.0, "8B": 12.0, "14B": 25.0}.get(LLM_MODEL, 10.0)
+
+    estimated = (base_time_per_frame * FRAMES * pixel_ratio * gpu_multiplier) + llm_overhead
+
+    minutes = estimated / 60.0
+    print(f"  Estimated generation time: ~{estimated:.0f}s ({minutes:.1f} min)")
+    print(f"    [{FRAMES} frames @ {WIDTH}x{HEIGHT} on {_VRAM_MGR.gpu_name}]")
+
+    return estimated
+
+
+def estimate_vram_usage():
+    """Estimate peak VRAM usage in GB for current settings.
+
+    Returns estimated peak VRAM in GB as a float.
+    """
+    # Base model footprint
+    base_model_gb = 4.5  # LTX-Video transformer
+
+    # LLM VRAM
+    llm_gb = {"3B": 4.0, "8B": 10.0, "14B": 18.0}.get(LLM_MODEL, 5.0)
+
+    # Resolution/frames scaling for latent space
+    # Latents are roughly (frames/8) * (height/32) * (width/32) * channels * dtype_size
+    latent_elements = (FRAMES / 8.0) * (HEIGHT / 32.0) * (WIDTH / 32.0) * 128
+    latent_gb = (latent_elements * 4) / (1024**3)  # fp32
+
+    # VAE decode VRAM (peaks during decode)
+    vae_gb = 2.0 if USE_TILED_VAE else (latent_gb * 2.5)
+
+    # Extras
+    extras_gb = 0.0
+    if ENABLE_CHARACTER_SYSTEM:
+        extras_gb += 1.5
+    if ENABLE_VISION_ANALYSIS:
+        extras_gb += 2.0
+    if ENABLE_UPSCALING:
+        extras_gb += 2.5
+
+    # Peak is typically model + LLM (if not offloaded) or model + VAE decode
+    peak_with_llm = base_model_gb + llm_gb + latent_gb + extras_gb
+    peak_at_decode = base_model_gb + vae_gb + latent_gb + extras_gb
+    peak = max(peak_with_llm, peak_at_decode)
+
+    print(f"  Estimated peak VRAM: ~{peak:.1f} GB")
+    print(f"    Model: {base_model_gb:.1f} GB | LLM: {llm_gb:.1f} GB | "
+          f"Latents: {latent_gb:.1f} GB | VAE: {vae_gb:.1f} GB")
+    if extras_gb > 0:
+        print(f"    Extras: {extras_gb:.1f} GB (character, vision, upscale)")
+    print(f"    Available: {_VRAM_MGR.total_vram_gb:.1f} GB [{_VRAM_MGR.gpu_name}]")
+
+    if peak > _VRAM_MGR.total_vram_gb and _VRAM_MGR.total_vram_gb > 0:
+        print(f"  ⚠ WARNING: Estimated peak ({peak:.1f} GB) exceeds available VRAM!")
+
+    return peak
+
+
+def suggest_settings(goal):
+    """Suggest optimal settings for a given goal.
+
+    Supported goals: "fast preview", "max quality", "long video"
+    """
+    goal_lower = goal.lower().strip()
+
+    if goal_lower == "fast preview":
+        print("  SUGGESTED SETTINGS: Fast Preview")
+        print("  ─────────────────────────────────")
+        print("  GENERATION_PRESET  = 'Quick Draft'")
+        print("  RESOLUTION_PRESET  = 'Square 1:1'")
+        print("  GENERATION_MODE    = 'Single Clip'")
+        print("  ENABLE_UPSCALING   = False")
+        print("  ENABLE_AUDIO       = False")
+        print("  TIP: Use BYPASS_EASY_PROMPT=True for instant prompt passthrough")
+    elif goal_lower == "max quality":
+        print("  SUGGESTED SETTINGS: Max Quality")
+        print("  ────────────────────────────────")
+        print("  GENERATION_PRESET  = 'Cinema Quality'")
+        print("  RESOLUTION_PRESET  = 'Widescreen 21:9'")
+        print("  GENERATION_MODE    = 'Single Clip'")
+        print("  ENABLE_QUALITY_CHECKS = True")
+        print("  ENABLE_CHARACTER_SYSTEM = True")
+        print("  TIP: Requires A100/L4 (24+ GB VRAM)")
+    elif goal_lower == "long video":
+        print("  SUGGESTED SETTINGS: Long Video")
+        print("  ───────────────────────────────")
+        print("  GENERATION_PRESET  = 'Standard'")
+        print("  RESOLUTION_PRESET  = 'Landscape 16:9'")
+        print("  GENERATION_MODE    = 'Infinite Flow'")
+        print("  ENABLE_SEGMENT_EXTENSION = True")
+        print("  ENABLE_SCENE_CONTINUITY  = True")
+        print("  TIP: Set FRAMES=161 for each segment, total length via repetitions")
+    else:
+        print(f"  Unknown goal: '{goal}'. Available: 'fast preview', 'max quality', 'long video'")
+
+
+# ── Feature toggles summary ──────────────────────────────────────────────────
+print()
+print("  ── Cell 3.6 Summary ──────────────────────────────────────────────")
+print(f"   {'✓' if ENABLE_VIDEO_GENERATION else '✗'} Video Generation   "
+      f"{'✓' if ENABLE_UPSCALING else '✗'} Upscaling          "
+      f"{'✓' if ENABLE_AUDIO_GENERATION else '✗'} Audio")
+print(f"   {'✓' if ENABLE_CHARACTER_SYSTEM else '✗'} Character System   "
+      f"{'✓' if ENABLE_POST_PROCESSING else '✗'} Post-Processing    "
+      f"{'✓' if ENABLE_QUALITY_CHECKS else '✗'} Quality Checks")
+print(f"   {'✓' if ENABLE_LLM_PROMPT_EXPANSION else '✗'} LLM Expansion      "
+      f"{'✓' if ENABLE_VISION_ANALYSIS else '✗'} Vision Analysis    "
+      f"{'✓' if ENABLE_SCENE_CONTINUITY else '✗'} Scene Continuity")
+print(f"   {'✓' if ENABLE_SEGMENT_EXTENSION else '✗'} Segment Extension")
+print(f"   GPU: {_VRAM_MGR.gpu_name} ({_VRAM_MGR.total_vram_gb:.1f} GB)")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
