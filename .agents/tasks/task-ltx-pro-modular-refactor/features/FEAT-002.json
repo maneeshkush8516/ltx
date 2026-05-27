@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "refactor",
   "description": "Create the domain modules: prompt_architect.py, vision_describe.py, character.py, lora.py, overlap.py. These contain the core classes extracted from Cell 3 of LTX_PRO.py.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create ltx_pro/prompt_architect.py: Extract the InlinePromptArchitect class (lines 479-1163) and the _get_inline_prompt_architect() singleton helper (line 1164). Also extract run_easy_prompt() function (line 2776). Import from ltx_pro.vram where needed (for _VRAM_MGR references). Include all class-level compiled regex patterns (_EXPLICIT_RE, _SENSUAL_RE, etc.). Include __all__ export list.",
     "Create ltx_pro/vision_describe.py: Extract InlineVisionDescribe class (lines 1175-1315) and _get_inline_vision_describer() singleton (line 1316). Also extract run_vision_describe() function (line 2825). Include __all__ export list.",
@@ -29,5 +29,5 @@
     "python3 -m py_compile ltx_pro/overlap.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 5 domain modules extracted and compile cleanly. Heavy imports (torch, transformers, numpy, cv2, PIL, comfy/nodes) are all guarded inside function bodies. The run_easy_prompt and run_vision_describe wrappers use globals().get() for config variables that come from the notebook environment. CharacterFeatureExtractor imports load_image_tensor from ltx_pro.utils and InlineVisionDescribe from ltx_pro.vision_describe at call time. Type annotations referencing torch.Tensor in function signatures were replaced with bare parameter names to avoid import issues. _VRAM_MGR and _deep_unload_model are imported from ltx_pro.vram inside method bodies."
 }
