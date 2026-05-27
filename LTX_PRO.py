@@ -5893,6 +5893,20 @@ def generate_pro(
     _export_timeline = export_timeline if export_timeline is not None else EXPORT_TIMELINE
     _persist_to_gdrive = persist_to_gdrive if persist_to_gdrive is not None else PERSIST_TO_GDRIVE
 
+    # ── Resolve feature toggles (Cell 3.6) ────────────────────────────────
+    _enable_video = ENABLE_VIDEO_GENERATION
+    _enable_upscaling = ENABLE_UPSCALING
+    _enable_audio = ENABLE_AUDIO_GENERATION
+    _enable_character = ENABLE_CHARACTER_SYSTEM
+    _enable_post_processing = ENABLE_POST_PROCESSING
+    _enable_quality_checks = ENABLE_QUALITY_CHECKS
+
+    # Toggle-driven overrides
+    if not ENABLE_LLM_PROMPT_EXPANSION:
+        _bypass = True  # Force bypass when LLM expansion is disabled
+    if not ENABLE_VISION_ANALYSIS:
+        _use_vision = False  # Force vision off when disabled
+
     # ── Apply VRAMManager optimal settings (unless user explicitly overrode) ──
     _vram_settings = _VRAM_MGR.get_optimal_settings()
     if _VRAM_MGR.is_t4 or _VRAM_MGR.is_low_vram:
@@ -5956,12 +5970,14 @@ def generate_pro(
 
     # Load character image tensor for consistency anchor
     char_image_tensor = None
-    if character_image_path and _char_mode != "none":
+    if character_image_path and _char_mode != "none" and _enable_character:
         char_image_tensor = load_image_tensor(character_image_path)
         if char_image_tensor is None:
             print(f"   ⚠️  Character image not found: {character_image_path} — skipping anchor.")
         else:
             print(f"   ✓ Character image loaded: {character_image_path}  {char_image_tensor.shape}")
+    elif not _enable_character and character_image_path and _char_mode != "none":
+        print("   [SKIPPED] Character system disabled via ENABLE_CHARACTER_SYSTEM=False")
 
     # Determine analysis image: prefer character image for vision analysis
     analysis_tensor = char_image_tensor if char_image_tensor is not None else seed_image_tensor
@@ -5997,6 +6013,16 @@ def generate_pro(
         print(f"   {final_negative[:150]}…")
     else:
         print("   [EasyPrompt] Bypassed — using manual POSITIVE_PROMPT.")
+
+    # ── Feature Toggle: Video Generation Master Switch ────────────────────
+    if not _enable_video:
+        print("\n" + "="*70)
+        print("   [FEATURE TOGGLE] Video generation DISABLED")
+        print("   Prompt expansion complete. Returning expanded prompt only.")
+        print("="*70)
+        print(f"\n   Final positive prompt:\n   {final_positive[:500]}")
+        print(f"\n   Final negative prompt:\n   {final_negative[:200]}")
+        return None
 
     # LLM/Vision should now be unloaded - aggressive VRAM cleanup before CLIP
     # FEAT-002: Add torch.cuda.synchronize() + empty_cache() between model transitions
@@ -6240,10 +6266,9 @@ def generate_pro(
         # [295] VAEEncode from SVI-Pro-Workflow.json - encodes character image.
         # We resize to half_w x half_h so the anchor latent matches EmptyLTXVLatentVideo.
         anchor_latent = None
-        if char_image_tensor is not None and _char_mode in ("anchor", "both"):
+        if char_image_tensor is not None and _char_mode in ("anchor", "both") and _enable_character:
             print("\n🧬 Character Anchor - encoding character image as latent...")
             try:
-                # [165] ImageResizeKJv2 - resize to HALF resolution (matches vid_lat)
                 # half_w x half_h ensures spatial dims match EmptyLTXVLatentVideo
                 ikj = NODE_CLASS_MAPPINGS["ImageResizeKJv2"]()
                 char_resized = get_value_at_index(
@@ -6408,7 +6433,7 @@ def generate_pro(
         # ── PersistentLatentSeed: blend identity noise into first N frames ────
         # Wire blend_into_latent() with OVERLAP_FRAMES_CHARACTER for modes
         # "anchor" or "both" when a character image is provided.
-        if char_image_tensor is not None and _char_mode in ("anchor", "both"):
+        if char_image_tensor is not None and _char_mode in ("anchor", "both") and _enable_character:
             try:
                 _persistent_seed = PersistentLatentSeed(
                     reference_image=char_image_tensor,
@@ -6558,91 +6583,99 @@ def generate_pro(
         # PHASE 7 — PASS 2 (spatial upscale + refinement)
         # ══════════════════════════════════════════════════════════════════
 
-        print(f"\n🔧 Pass 2 — upscale + refinement…")
-        _print_vram()
+        if _enable_upscaling:
+            print(f"\n🔧 Pass 2 — upscale + refinement…")
+            _print_vram()
 
-        # [LTXVSeparateAVLatent] — split P1 AV → video + audio
-        ltxvsep    = NODE_CLASS_MAPPINGS["LTXVSeparateAVLatent"]()
-        s1         = ltxvsep.EXECUTE_NORMALIZED(av_latent=p1_av)
-        vid_lat_p1 = get_value_at_index(s1, 0)
-        aud_lat_p1 = get_value_at_index(s1, 1)
+            # [LTXVSeparateAVLatent] — split P1 AV → video + audio
+            ltxvsep    = NODE_CLASS_MAPPINGS["LTXVSeparateAVLatent"]()
+            s1         = ltxvsep.EXECUTE_NORMALIZED(av_latent=p1_av)
+            vid_lat_p1 = get_value_at_index(s1, 0)
+            aud_lat_p1 = get_value_at_index(s1, 1)
 
-        # [LTXVCropGuides] — trim conditioning to match upscaled latent dims
-        ltxvcrop = NODE_CLASS_MAPPINGS["LTXVCropGuides"]()
-        cropped  = ltxvcrop.EXECUTE_NORMALIZED(
-            positive=get_value_at_index(cond, 0),
-            negative=get_value_at_index(cond, 1),
-            latent=vid_lat_p1)
-        # cropped[0]=positive, [1]=negative, [2]=cropped_video_lat
+            # [LTXVCropGuides] — trim conditioning to match upscaled latent dims
+            ltxvcrop = NODE_CLASS_MAPPINGS["LTXVCropGuides"]()
+            cropped  = ltxvcrop.EXECUTE_NORMALIZED(
+                positive=get_value_at_index(cond, 0),
+                negative=get_value_at_index(cond, 1),
+                latent=vid_lat_p1)
+            # cropped[0]=positive, [1]=negative, [2]=cropped_video_lat
 
-        # CFGGuider for Pass 2 with cropped conditioning
-        guider_p2 = cfgguider.EXECUTE_NORMALIZED(
-            cfg=pass2_cfg,
-            model=unet,
-            positive=get_value_at_index(cropped, 0),
-            negative=get_value_at_index(cropped, 1))
+            # CFGGuider for Pass 2 with cropped conditioning
+            guider_p2 = cfgguider.EXECUTE_NORMALIZED(
+                cfg=pass2_cfg,
+                model=unet,
+                positive=get_value_at_index(cropped, 0),
+                negative=get_value_at_index(cropped, 1))
 
-        # [LTXVLatentUpsampler] [118] - 2x spatial upsample
-        # Load VAE and upscale model fresh for upsampling
-        vae_for_up = get_value_at_index(
-            NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)
+            # [LTXVLatentUpsampler] [118] - 2x spatial upsample
+            # Load VAE and upscale model fresh for upsampling
+            vae_for_up = get_value_at_index(
+                NODE_CLASS_MAPPINGS["VAELoader"]().load_vae(vae_name=VAE_VIDEO_MODEL), 0)
 
-        # [189] LatentUpscaleModelLoader in LD-I2V.json
-        try:
-            uml = NODE_CLASS_MAPPINGS["LatentUpscaleModelLoader"]()
-            # Try EXECUTE_NORMALIZED first; fall back to load_model if absent
-            if hasattr(uml, "EXECUTE_NORMALIZED"):
-                upscale_model = get_value_at_index(
-                    uml.EXECUTE_NORMALIZED(model_name=UPSCALER_MODEL), 0)
-            elif hasattr(uml, "load_model"):
-                upscale_model = get_value_at_index(
-                    uml.load_model(model_name=UPSCALER_MODEL), 0)
-            else:
-                raise AttributeError("LatentUpscaleModelLoader: no load method found")
-        except Exception as e:
-            if vae_audio is not None:
-                del vae_audio
-                vae_audio = None
-            raise RuntimeError(
-                f"LatentUpscaleModelLoader failed: {e}\n"
-                "  Fix: Download UPSCALER_MODEL in Cell 2."
-            )
+            # [189] LatentUpscaleModelLoader in LD-I2V.json
+            try:
+                uml = NODE_CLASS_MAPPINGS["LatentUpscaleModelLoader"]()
+                # Try EXECUTE_NORMALIZED first; fall back to load_model if absent
+                if hasattr(uml, "EXECUTE_NORMALIZED"):
+                    upscale_model = get_value_at_index(
+                        uml.EXECUTE_NORMALIZED(model_name=UPSCALER_MODEL), 0)
+                elif hasattr(uml, "load_model"):
+                    upscale_model = get_value_at_index(
+                        uml.load_model(model_name=UPSCALER_MODEL), 0)
+                else:
+                    raise AttributeError("LatentUpscaleModelLoader: no load method found")
+            except Exception as e:
+                if vae_audio is not None:
+                    del vae_audio
+                    vae_audio = None
+                raise RuntimeError(
+                    f"LatentUpscaleModelLoader failed: {e}\n"
+                    "  Fix: Download UPSCALER_MODEL in Cell 2."
+                )
 
-        ltxvup    = NODE_CLASS_MAPPINGS["LTXVLatentUpsampler"]()
-        upsampled = ltxvup.upsample_latent(
-            samples=get_value_at_index(cropped, 2),
-            upscale_model=upscale_model,
-            vae=vae_for_up)
-        del vae_for_up, upscale_model
-        aggressive_cleanup("VAE upscale done")
+            ltxvup    = NODE_CLASS_MAPPINGS["LTXVLatentUpsampler"]()
+            upsampled = ltxvup.upsample_latent(
+                samples=get_value_at_index(cropped, 2),
+                upscale_model=upscale_model,
+                vae=vae_for_up)
+            del vae_for_up, upscale_model
+            aggressive_cleanup("VAE upscale done")
 
-        # [LTXVConcatAVLatent] [117] — upsampled video + audio
-        av_lat2 = catav.EXECUTE_NORMALIZED(
-            video_latent=get_value_at_index(upsampled, 0),
-            audio_latent=aud_lat_p1)
+            # [LTXVConcatAVLatent] [117] — upsampled video + audio
+            av_lat2 = catav.EXECUTE_NORMALIZED(
+                video_latent=get_value_at_index(upsampled, 0),
+                audio_latent=aud_lat_p1)
 
-        noise_p2 = randomnoise.EXECUTE_NORMALIZED(noise_seed=pass2_seed)
+            noise_p2 = randomnoise.EXECUTE_NORMALIZED(noise_seed=pass2_seed)
 
-        try:
-            out2 = sca.EXECUTE_NORMALIZED(
-                noise=get_value_at_index(noise_p2, 0),
-                guider=get_value_at_index(guider_p2, 0),
-                sampler=get_value_at_index(sampler_p2, 0),
-                sigmas=sig_p2_low,
-                latent_image=get_value_at_index(av_lat2, 0))
-            p2_denoised = get_value_at_index(out2, 1)  # denoised_output slot
-        except Exception as e:
-            if vae_audio is not None:
-                del vae_audio
-                vae_audio = None
-            raise RuntimeError(
-                f"Pass 2 sampling failed: {e}\n"
-                "  Fix: Try reducing TILED_SPATIAL_TILES or USE_TILED_VAE=False."
-            )
+            try:
+                out2 = sca.EXECUTE_NORMALIZED(
+                    noise=get_value_at_index(noise_p2, 0),
+                    guider=get_value_at_index(guider_p2, 0),
+                    sampler=get_value_at_index(sampler_p2, 0),
+                    sigmas=sig_p2_low,
+                    latent_image=get_value_at_index(av_lat2, 0))
+                p2_denoised = get_value_at_index(out2, 1)  # denoised_output slot
+            except Exception as e:
+                if vae_audio is not None:
+                    del vae_audio
+                    vae_audio = None
+                raise RuntimeError(
+                    f"Pass 2 sampling failed: {e}\n"
+                    "  Fix: Try reducing TILED_SPATIAL_TILES or USE_TILED_VAE=False."
+                )
 
-        del guider_p2, unet
-        aggressive_cleanup("Pass 2 done - UNet freed")
-        print("   ✓ Pass 2 complete")
+            del guider_p2, unet
+            aggressive_cleanup("Pass 2 done - UNet freed")
+            print("   ✓ Pass 2 complete")
+        else:
+            print("\n   [SKIPPED] Phase 7 - Upscaling disabled via ENABLE_UPSCALING=False")
+            print("   Decoding directly from Pass 1 output.")
+            p2_denoised = p1_av
+            ltxvsep = NODE_CLASS_MAPPINGS["LTXVSeparateAVLatent"]()
+            del unet
+            aggressive_cleanup("Pass 2 skipped - UNet freed")
 
         # ══════════════════════════════════════════════════════════════════
         # PHASE 8 — DECODE
@@ -6700,20 +6733,24 @@ def generate_pro(
 
         # ── Audio decode [201] ─────────────────────────────────────────────
         # [201] LTXVAudioVAEDecode - decode audio latent
-        try:
-            aud_dec   = NODE_CLASS_MAPPINGS["LTXVAudioVAEDecode"]()
-            audio_out = aud_dec.EXECUTE_NORMALIZED(
-                samples=aud_lat_fin,
-                audio_vae=vae_audio)
-        except Exception as e:
-            print(f"   ⚠️  Audio decode failed ({e}) - proceeding without audio.")
-            audio_out = None
+        audio_out = None
+        if _enable_audio:
+            try:
+                aud_dec   = NODE_CLASS_MAPPINGS["LTXVAudioVAEDecode"]()
+                audio_out = aud_dec.EXECUTE_NORMALIZED(
+                    samples=aud_lat_fin,
+                    audio_vae=vae_audio)
+            except Exception as e:
+                print(f"   ⚠️  Audio decode failed ({e}) - proceeding without audio.")
+                audio_out = None
+        else:
+            print("   [SKIPPED] Audio decode disabled via ENABLE_AUDIO_GENERATION=False")
 
         del vae_audio
         aggressive_cleanup("audio VAE done")
 
         # ── POST-PROCESSING: Color matching & grading (FEAT-003) ──────────
-        if decoded_frames is not None:
+        if decoded_frames is not None and _enable_post_processing:
             # Color histogram matching (style transfer from reference)
             if _use_color_matching and reference_histogram is not None:
                 try:
@@ -6729,24 +6766,26 @@ def generate_pro(
                     print(f"   ✓ Color grade applied: {_color_grade}")
                 except Exception as e:
                     print(f"   ⚠️  Color grading failed ({e}) - continuing without.")
+        elif decoded_frames is not None and not _enable_post_processing:
+            print("   [SKIPPED] Post-processing disabled via ENABLE_POST_PROCESSING=False")
 
-            # Character embedding bank accumulation
-            if embedding_bank is not None:
-                try:
-                    # Extract compact spatial-mean features from the last frame
-                    # rather than storing raw pixels - reduces memory and creates
-                    # a more meaningful representation for consistency matching
-                    _raw_frame = decoded_frames[-1:]
-                    if _raw_frame.ndim >= 3:
-                        # Spatial average: collapse H,W dims to get compact feature vector
-                        # Input shape: (1, H, W, C) or (1, C, H, W)
-                        _feat = _raw_frame.float().mean(dim=-2).mean(dim=-2)  # -> (1, C)
-                    else:
-                        _feat = _raw_frame.float()
-                    embedding_bank.accumulate(_feat)
-                    print(f"   \u2713 Character embedding bank updated ({len(embedding_bank)} samples)")
-                except Exception as e:
-                    print(f"   \u26a0\ufe0f  Embedding bank update failed ({e})")
+        # Character embedding bank accumulation
+        if decoded_frames is not None and embedding_bank is not None and _enable_character:
+            try:
+                # Extract compact spatial-mean features from the last frame
+                # rather than storing raw pixels - reduces memory and creates
+                # a more meaningful representation for consistency matching
+                _raw_frame = decoded_frames[-1:]
+                if _raw_frame.ndim >= 3:
+                    # Spatial average: collapse H,W dims to get compact feature vector
+                    # Input shape: (1, H, W, C) or (1, C, H, W)
+                    _feat = _raw_frame.float().mean(dim=-2).mean(dim=-2)  # -> (1, C)
+                else:
+                    _feat = _raw_frame.float()
+                embedding_bank.accumulate(_feat)
+                print(f"   \u2713 Character embedding bank updated ({len(embedding_bank)} samples)")
+            except Exception as e:
+                print(f"   \u26a0\ufe0f  Embedding bank update failed ({e})")
 
         # ══════════════════════════════════════════════════════════════════
         # PHASE 9 — SAVE  (VHS_VideoCombine preferred, CreateVideo fallback)
