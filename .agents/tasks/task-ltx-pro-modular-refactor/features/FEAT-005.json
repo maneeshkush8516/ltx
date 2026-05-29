@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Create the new Story-to-Video system module (ltx_pro/story_to_video.py) - a dedicated YouTube-series-focused story-to-video pipeline with episode/series awareness, character persistence, and production package export.",
+  "status": "completed",
+  "steps": [
+    "Create ltx_pro/story_to_video.py implementing the StoryToVideo class with these methods: __init__(config), load_story(script, title), extract_characters(), set_series_characters(characters), generate_episode_prompts(episode_number), set_visual_style(style, quality), generate_all_videos(scenes), export_production_package(output_dir).",
+    "Implement episode/series awareness: StoryToVideo should maintain a _series_characters dict that persists across episodes. Add _episode_history list to track what happened in previous episodes. Include generate_recap_scene() method for 'Previously on...' scenes.",
+    "Implement YouTube-optimized features: generate_chapter_markers(scenes) that outputs YouTube chapter marker format (00:00 Title), extract_thumbnail_candidates(scenes) that picks the best thumbnail frame per scene, set_aspect_ratio(ratio) supporting '16:9' (landscape), '9:16' (shorts), '1:1' (square).",
+    "Implement cliffhanger detection: _detect_cliffhanger(scene_text) that looks for tension/suspense indicators in the final scene and applies special camera treatment (slow dolly-in, dramatic lighting keywords).",
+    "Implement export_production_package(): creates a directory with ordered video clips list, timeline JSON + EDL, character reference sheets (JSON profiles), prompt log, continuity notes between scenes, and Sora-style JSON export for the full episode.",
+    "Add _generate_character_consistency_prompt(character_profile) that builds a detailed prompt prefix from the structured character profile, and _generate_scene_transition(prev_scene, next_scene) for smooth transitions.",
+    "Add __all__ export list and comprehensive docstrings to all public methods. Guard heavy imports (torch, etc.) so the file passes py_compile.",
+    "Run verification: python3 -m py_compile ltx_pro/story_to_video.py"
+  ],
+  "acceptance_criteria": [
+    "ltx_pro/story_to_video.py exists with StoryToVideo class implementing all specified methods",
+    "Episode/series awareness: _series_characters persists, generate_recap_scene() exists",
+    "YouTube features: chapter markers, thumbnail extraction, aspect ratio support",
+    "Cliffhanger detection with special camera treatment",
+    "Production package export with all specified outputs",
+    "File passes python3 -m py_compile",
+    "All public methods have docstrings",
+    "__all__ export list present"
+  ],
+  "verification": [
+    "python3 -m py_compile ltx_pro/story_to_video.py",
+    "python3 -c \"import ast; tree = ast.parse(open('ltx_pro/story_to_video.py').read()); classes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]; assert any(c.name == 'StoryToVideo' for c in classes), 'StoryToVideo class not found'\""
+  ],
+  "blocked_reason": null,
+  "findings": "Created story_to_video.py (823 lines) with StoryToVideo class containing all 16 required methods. All public methods have docstrings. __all__ exports StoryToVideo. File passes py_compile. All sibling module imports are inside method bodies to avoid circular imports. Module uses regex heuristics for character extraction (age, hair, clothing, body type, distinguishing features). Cliffhanger detection uses keyword matching and punctuation analysis. YouTube features include chapter markers in standard format, thumbnail scoring by visual interest keywords, and 3 aspect ratio presets. Line count is slightly above the 400-600 approximate guideline due to comprehensive docstrings on all public methods as required by acceptance criteria."
+}

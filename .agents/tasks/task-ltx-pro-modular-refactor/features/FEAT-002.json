@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-002",
+  "type": "refactor",
+  "description": "Create the domain modules: prompt_architect.py, vision_describe.py, character.py, lora.py, overlap.py. These contain the core classes extracted from Cell 3 of LTX_PRO.py.",
+  "status": "completed",
+  "steps": [
+    "Create ltx_pro/prompt_architect.py: Extract the InlinePromptArchitect class (lines 479-1163) and the _get_inline_prompt_architect() singleton helper (line 1164). Also extract run_easy_prompt() function (line 2776). Import from ltx_pro.vram where needed (for _VRAM_MGR references). Include all class-level compiled regex patterns (_EXPLICIT_RE, _SENSUAL_RE, etc.). Include __all__ export list.",
+    "Create ltx_pro/vision_describe.py: Extract InlineVisionDescribe class (lines 1175-1315) and _get_inline_vision_describer() singleton (line 1316). Also extract run_vision_describe() function (line 2825). Include __all__ export list.",
+    "Create ltx_pro/character.py: Extract PersistentLatentSeed class (lines 1327-1605), CharacterPromptAnchor class (lines 1606-1702), CharacterFeatureExtractor class (lines 1703-1828), CharacterEmbeddingBank class (line 2915), extract_multi_anchor_frames() (line 2872), create_style_lock() (line 2950), extract_continuity_composite() (line 2985), save_continuity_frame() (line 3052), extract_character_profiles_from_script() (line 4868). Include __all__ export list.",
+    "Create ltx_pro/lora.py: Extract _IC_LORA_FILES dict, _CAMERA_LORA_FILES dict, _build_lora_stack() function (line 2677), apply_lora_stack() function (line 2694), apply_sage_attention() (line 2568), apply_chunk_ff() (line 2589), _load_audio_vae() (line 2643). Include __all__ export list.",
+    "Create ltx_pro/overlap.py: Extract blend_overlap_frames() (line 2373), extract_anchor_frame() (line 2452), compute_segment_seeds() (line 2478). Include __all__ export list.",
+    "Ensure all modules pass python3 -m py_compile. Guard heavy imports (torch, transformers, numpy, cv2, comfy nodes, etc.) so files are syntax-valid.",
+    "Run verification: find ltx_pro -name '*.py' -exec python3 -m py_compile {} \\;"
+  ],
+  "acceptance_criteria": [
+    "ltx_pro/prompt_architect.py contains InlinePromptArchitect with full tier detection, run_easy_prompt(), __all__",
+    "ltx_pro/vision_describe.py contains InlineVisionDescribe with describe() method, run_vision_describe(), __all__",
+    "ltx_pro/character.py contains PersistentLatentSeed, CharacterPromptAnchor, CharacterFeatureExtractor, CharacterEmbeddingBank, __all__",
+    "ltx_pro/lora.py contains LoRA stack helpers and performance patch functions with __all__",
+    "ltx_pro/overlap.py contains frame blending, anchor extraction, seed computation with __all__",
+    "All five files pass python3 -m py_compile",
+    "All public classes and functions have docstrings"
+  ],
+  "verification": [
+    "python3 -m py_compile ltx_pro/prompt_architect.py",
+    "python3 -m py_compile ltx_pro/vision_describe.py",
+    "python3 -m py_compile ltx_pro/character.py",
+    "python3 -m py_compile ltx_pro/lora.py",
+    "python3 -m py_compile ltx_pro/overlap.py"
+  ],
+  "blocked_reason": null,
+  "findings": "All 5 domain modules extracted and compile cleanly. Heavy imports (torch, transformers, numpy, cv2, PIL, comfy/nodes) are all guarded inside function bodies. The run_easy_prompt and run_vision_describe wrappers use globals().get() for config variables that come from the notebook environment. CharacterFeatureExtractor imports load_image_tensor from ltx_pro.utils and InlineVisionDescribe from ltx_pro.vision_describe at call time. Type annotations referencing torch.Tensor in function signatures were replaced with bare parameter names to avoid import issues. _VRAM_MGR and _deep_unload_model are imported from ltx_pro.vram inside method bodies."
+}

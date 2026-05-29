@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Integrate the new ENABLE_* feature toggles into the generate_pro() function (starts at line 5250) so that toggling a feature off causes the corresponding phase to be skipped gracefully. This is the integration layer that makes the Cell 3.6 toggles actually effective.",
+  "status": "completed",
+  "steps": [
+    "At the top of generate_pro() (after the existing resolve-overrides block around line 5415-5430), add resolution of the new ENABLE_* toggles: _enable_video = ENABLE_VIDEO_GENERATION, _enable_upscaling = ENABLE_UPSCALING, _enable_audio = ENABLE_AUDIO_GENERATION, _enable_character = ENABLE_CHARACTER_SYSTEM, _enable_post_processing = ENABLE_POST_PROCESSING, _enable_quality_checks = ENABLE_QUALITY_CHECKS",
+    "If ENABLE_VIDEO_GENERATION is False: after Phase 0 (EasyPrompt expansion, around line 5530), add an early-return block that prints the expanded prompt and returns None without loading any video models",
+    "If ENABLE_UPSCALING is False: wrap the entire PHASE 7 block (lines 6078-6175 approximately) in an 'if _enable_upscaling:' conditional. When skipped, decode directly from p1_av (Pass 1 output) instead - separate AV latent from p1_av and use vid_lat_p1 directly as vid_lat_fin",
+    "If ENABLE_AUDIO_GENERATION is False: skip the LTXVEmptyLatentAudio creation in Phase 4 (set aud_lat to None) and skip the LTXVAudioVAEDecode in Phase 8 (around line 6232). Ensure AV concat still works with a zero/empty audio latent or bypass it",
+    "If ENABLE_CHARACTER_SYSTEM is False: skip all character anchor logic in Phase 3/4 (the dual-anchor section around line 5696-5780). Set anchor_latent=None, skip PersistentLatentSeed, skip CharacterPromptAnchor, skip embedding bank accumulation",
+    "If ENABLE_POST_PROCESSING is False: skip the color matching and color grading block in Phase 8 (lines 6245-6270 approximately)",
+    "Add the ENABLE_LLM_PROMPT_EXPANSION toggle: if False, force _bypass=True (same as BYPASS_EASY_PROMPT=True)",
+    "Add the ENABLE_VISION_ANALYSIS toggle: if False, force _use_vision=False",
+    "Ensure each skipped phase prints a clear message like: print('   [SKIPPED] Phase 7 - Upscaling disabled via ENABLE_UPSCALING=False')"
+  ],
+  "acceptance_criteria": [
+    "python3 -m py_compile LTX_PRO.py passes without errors",
+    "When ENABLE_VIDEO_GENERATION=False, generate_pro() returns None after prompt expansion",
+    "When ENABLE_UPSCALING=False, Phase 7 is entirely skipped and decode uses Pass 1 output",
+    "When ENABLE_CHARACTER_SYSTEM=False, no character anchor/embedding logic executes",
+    "When ENABLE_POST_PROCESSING=False, no color matching or grading is applied",
+    "Each skipped phase prints a descriptive skip message",
+    "All existing functionality works unchanged when all ENABLE_* flags are True (default)"
+  ],
+  "verification": [
+    "python3 -m py_compile LTX_PRO.py"
+  ],
+  "blocked_reason": null,
+  "findings": "Integrated all ENABLE_* toggles into generate_pro(). Toggle resolution block at line ~5896. Early return for ENABLE_VIDEO_GENERATION=False before model loading. Character system guard on image loading, anchor encoding, PersistentLatentSeed blend, and embedding bank accumulation. Phase 7 wrapped in _enable_upscaling conditional with else branch setting p2_denoised=p1_av. Audio decode wrapped in _enable_audio conditional. Post-processing wrapped in _enable_post_processing conditional. ENABLE_LLM_PROMPT_EXPANSION forces _bypass=True. ENABLE_VISION_ANALYSIS forces _use_vision=False. All changes pass py_compile."
+}

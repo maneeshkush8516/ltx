@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-003",
+  "type": "refactor",
+  "description": "Create the processing and infrastructure modules: quality.py, motion.py, color.py, audio.py, export.py. These handle quality gating, optical flow, color grading, audio sync, and timeline/drive export.",
+  "status": "completed",
+  "steps": [
+    "Create ltx_pro/quality.py: Extract compute_frame_ssim() (line 3238), compute_histogram_consistency() (line 3275), compute_artifact_score() (line 3306), compute_segment_quality() (line 3340), quality_gate_check() (line 3379), detect_shot_type() (line 3411), get_resolution_for_shot() (line 3443). Include __all__ export list.",
+    "Create ltx_pro/motion.py: Extract estimate_optical_flow() (line 3082), detect_motion_direction() (line 3109), auto_select_camera_lora() (line 3147), compute_velocity_latent() (line 3171), compute_adaptive_overlap() (line 3194). Include __all__ export list.",
+    "Create ltx_pro/color.py: Extract extract_color_histogram() (line 3547), match_color_histogram() (line 3578), apply_color_grade() (line 3664). Include __all__ export list.",
+    "Create ltx_pro/audio.py: Extract AudioSyncEngine class (lines 1829-2105), detect_beats() (line 3897), compute_segment_boundaries() (line 3947), adjust_segment_length() (line 3985). Also extract the VOICE_SYNC configuration constants. Include __all__ export list.",
+    "Create ltx_pro/export.py: Extract generate_timeline_json() (line 3712), generate_edl() (line 3763), mount_google_drive() (line 3827), sync_to_drive() (line 3844), check_drive_cache() (line 3868), generate_thumbnail_frame() (line 4023), display_thumbnail_grid() (line 4082), concatenate_clips() (line 7552), merge_clips_to_video() (line 8199), auto_find_output_clips() (line 8372). Include __all__ export list.",
+    "Ensure all modules pass python3 -m py_compile. Guard heavy imports.",
+    "Run verification: find ltx_pro -name '*.py' -exec python3 -m py_compile {} \\;"
+  ],
+  "acceptance_criteria": [
+    "ltx_pro/quality.py contains SSIM, histogram, artifact scoring and quality gate functions with __all__",
+    "ltx_pro/motion.py contains optical flow, motion direction, velocity and adaptive overlap functions with __all__",
+    "ltx_pro/color.py contains histogram extraction, matching, and color grading with __all__",
+    "ltx_pro/audio.py contains AudioSyncEngine class and beat detection functions with __all__",
+    "ltx_pro/export.py contains timeline/EDL generation, Google Drive, thumbnails, and clip merging with __all__",
+    "All five files pass python3 -m py_compile",
+    "All public classes and functions have docstrings"
+  ],
+  "verification": [
+    "python3 -m py_compile ltx_pro/quality.py",
+    "python3 -m py_compile ltx_pro/motion.py",
+    "python3 -m py_compile ltx_pro/color.py",
+    "python3 -m py_compile ltx_pro/audio.py",
+    "python3 -m py_compile ltx_pro/export.py"
+  ],
+  "blocked_reason": null,
+  "findings": "All 5 modules created and pass py_compile. Package import works. motion.py and color.py guard numpy/cv2/torch inside function bodies. audio.py guards librosa inside methods. export.py guards subprocess/imageio/torch/numpy/PIL/shutil inside function bodies. quality.py guards torch inside function body. merge_clips_to_video imports blend_overlap_frames from ltx_pro.overlap with ImportError fallback."
+}
